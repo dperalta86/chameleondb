@@ -1,0 +1,130 @@
+use crate::ast::*;
+use std::collections::HashMap;
+
+grammar;
+
+// Whitespace y comentarios
+match {
+    r"\s*" => { },
+    r"//[^\n\r]*[\n\r]*" => { }, // comentarios de línea
+    _
+}
+
+// Punto de entrada
+pub Schema: Schema = {
+    <entities:Entity*> => {
+        let mut schema = Schema::new();
+        for entity in entities {
+            schema.add_entity(entity);
+        }
+        schema
+    }
+};
+
+// Entity definition
+Entity: Entity = {
+    "entity" <name:Ident> "{" <items:EntityItem*> "}" => {
+        let mut entity = Entity::new(name);
+        for item in items {
+            match item {
+                EntityItem::Field(f) => entity.add_field(f),
+                EntityItem::Relation(r) => entity.add_relation(r),
+            }
+        }
+        entity
+    }
+};
+
+enum EntityItem {
+    Field(Field),
+    Relation(Relation),
+}
+
+EntityItem: EntityItem = {
+    <Field> => EntityItem::Field(<>),
+    <Relation> => EntityItem::Relation(<>),
+};
+
+// Field definition
+Field: Field = {
+    <name:Ident> ":" <ft:FieldType> <mods:FieldModifier*> "," => {
+        let mut field = Field {
+            name,
+            field_type: ft,
+            nullable: false,
+            unique: false,
+            primary_key: false,
+            default: None,
+        };
+        
+        for modifier in mods {
+            match modifier {
+                FieldModifier::Primary => field.primary_key = true,
+                FieldModifier::Unique => field.unique = true,
+                FieldModifier::Nullable => field.nullable = true,
+                FieldModifier::Default(v) => field.default = Some(v),
+            }
+        }
+        
+        field
+    }
+};
+
+enum FieldModifier {
+    Primary,
+    Unique,
+    Nullable,
+    Default(DefaultValue),
+}
+
+FieldModifier: FieldModifier = {
+    "primary" => FieldModifier::Primary,
+    "unique" => FieldModifier::Unique,
+    "nullable" => FieldModifier::Nullable,
+    "default" <DefaultValue> => FieldModifier::Default(<>),
+};
+
+FieldType: FieldType = {
+    "uuid" => FieldType::UUID,
+    "string" => FieldType::String,
+    "int" => FieldType::Int,
+    "decimal" => FieldType::Decimal,
+    "bool" => FieldType::Bool,
+    "timestamp" => FieldType::Timestamp,
+};
+
+DefaultValue: DefaultValue = {
+    "now()" => DefaultValue::Now,
+    "uuid_v4()" => DefaultValue::UUIDv4,
+    <StringLit> => DefaultValue::Literal(<>),
+};
+
+// Relation definition
+Relation: Relation = {
+    <name:Ident> ":" "[" <target:Ident> "]" "via" <fk:Ident> "," => {
+        Relation {
+            name,
+            kind: RelationKind::HasMany,
+            target_entity: target,
+            foreign_key: Some(fk),
+            through: None,
+        }
+    },
+    
+    <name:Ident> ":" <target:Ident> "," => {
+        Relation {
+            name,
+            kind: RelationKind::BelongsTo,
+            target_entity: target,
+            foreign_key: None,
+            through: None,
+        }
+    },
+};
+
+// Tokens básicos
+Ident: String = r"[a-zA-Z_][a-zA-Z0-9_]*" => <>.to_string();
+StringLit: String = r#""([^"\\]|\\.)*""# => {
+    let s = <>;
+    s[1..s.len()-1].to_string()  // quitar comillas
+};
