@@ -1,13 +1,13 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
-use serde_json;
 
 use crate::parser::parse_schema;
 use crate::ast::Schema;
 
 /// Result code for FFI functions
 #[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChameleonResult {
     Ok = 0,
     ParseError = 1,
@@ -21,6 +21,19 @@ pub enum ChameleonResult {
 /// - `input` must be a valid null-terminated C string
 /// - Caller must free the returned string with `chameleon_free_string`
 /// - Returns NULL on error, check `error_out` for details
+/// 
+/// # Example (from C/Go)
+/// ```c
+/// char* error = NULL;
+/// char* json = chameleon_parse_schema("entity User { id: uuid primary, }", &error);
+/// if (json) {
+///     printf("%s\n", json);
+///     chameleon_free_string(json);
+/// } else {
+///     printf("Error: %s\n", error);
+///     chameleon_free_string(error);
+/// }
+/// ```
 #[no_mangle]
 pub unsafe extern "C" fn chameleon_parse_schema(
     input: *const c_char,
@@ -51,7 +64,7 @@ pub unsafe extern "C" fn chameleon_parse_schema(
     };
 
     // Serialize to JSON
-    let json = match serde_json::to_string(&schema) {
+    let json = match serde_json::to_string_pretty(&schema) {
         Ok(j) => j,
         Err(e) => {
             set_error(error_out, &format!("JSON serialization error: {}", e));
@@ -100,11 +113,18 @@ pub unsafe extern "C" fn chameleon_validate_schema(
         }
     };
 
-    // TODO: Implement actual validation logic
-    // For now, just check basic structure
+    // Basic validation (TODO: implement full type checker)
     if schema.entities.is_empty() {
         set_error(error_out, "Schema has no entities");
         return ChameleonResult::ValidationError;
+    }
+
+    // Check for entities with no fields
+    for (name, entity) in &schema.entities {
+        if entity.fields.is_empty() && entity.relations.is_empty() {
+            set_error(error_out, &format!("Entity '{}' has no fields or relations", name));
+            return ChameleonResult::ValidationError;
+        }
     }
 
     ChameleonResult::Ok
@@ -115,6 +135,7 @@ pub unsafe extern "C" fn chameleon_validate_schema(
 /// # Safety
 /// - `s` must be a pointer previously returned by a chameleon_* function
 /// - Do not call this twice on the same pointer
+/// - Passing NULL is safe (no-op)
 #[no_mangle]
 pub unsafe extern "C" fn chameleon_free_string(s: *mut c_char) {
     if !s.is_null() {
@@ -123,6 +144,9 @@ pub unsafe extern "C" fn chameleon_free_string(s: *mut c_char) {
 }
 
 /// Get the version of the library
+/// 
+/// # Safety
+/// Returns a static string, do not free
 #[no_mangle]
 pub extern "C" fn chameleon_version() -> *const c_char {
     static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
@@ -144,7 +168,7 @@ mod tests {
     use std::ffi::CString;
 
     #[test]
-    fn test_parse_schema_ffi() {
+    fn test_parse_schema_success() {
         let input = CString::new(r#"
             entity User {
                 id: uuid primary,
@@ -190,11 +214,52 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_schema() {
+        let schema_json = CString::new(r#"
+        {
+            "entities": {
+                "User": {
+                    "name": "User",
+                    "fields": {
+                        "id": {
+                            "name": "id",
+                            "field_type": "UUID",
+                            "nullable": false,
+                            "unique": false,
+                            "primary_key": true,
+                            "default": null
+                        }
+                    },
+                    "relations": {}
+                }
+            }
+        }
+        "#).unwrap();
+
+        let mut error: *mut c_char = ptr::null_mut();
+        
+        unsafe {
+            let result = chameleon_validate_schema(schema_json.as_ptr(), &mut error);
+            
+            assert_eq!(result, ChameleonResult::Ok);
+            assert!(error.is_null());
+        }
+    }
+
+    #[test]
     fn test_version() {
         unsafe {
             let version = CStr::from_ptr(chameleon_version());
             let version_str = version.to_str().unwrap();
             assert_eq!(version_str, env!("CARGO_PKG_VERSION"));
+        }
+    }
+
+    #[test]
+    fn test_free_null_is_safe() {
+        unsafe {
+            chameleon_free_string(ptr::null_mut());
+            // Should not crash
         }
     }
 }

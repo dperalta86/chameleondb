@@ -1,12 +1,14 @@
 use std::ffi::{CStr, CString};
 use std::ptr;
 
-// External declarations (simulating C caller)
-extern "C" {
-    fn chameleon_parse_schema(input: *const i8, error_out: *mut *mut i8) -> *mut i8;
-    fn chameleon_free_string(s: *mut i8);
-    fn chameleon_version() -> *const i8;
-}
+// Import desde el crate
+use chameleon_core::{
+    chameleon_parse_schema,
+    chameleon_validate_schema,
+    chameleon_free_string,
+    chameleon_version,
+    ChameleonResult,
+};
 
 #[test]
 fn test_ffi_roundtrip() {
@@ -41,6 +43,11 @@ fn test_ffi_roundtrip() {
         
         println!("Parsed JSON:\n{}", json);
         
+        // Test validation
+        let validation_result = chameleon_validate_schema(result, &mut error);
+        assert_eq!(validation_result, ChameleonResult::Ok);
+        assert!(error.is_null());
+        
         chameleon_free_string(result);
     }
 }
@@ -51,5 +58,25 @@ fn test_version() {
         let version = CStr::from_ptr(chameleon_version());
         let version_str = version.to_str().unwrap();
         assert_eq!(version_str, env!("CARGO_PKG_VERSION"));
+        println!("ChameleonDB version: {}", version_str);
+    }
+}
+
+#[test]
+fn test_error_handling() {
+    let input = CString::new("this is not valid syntax").unwrap();
+    let mut error: *mut i8 = ptr::null_mut();
+    
+    unsafe {
+        let result = chameleon_parse_schema(input.as_ptr(), &mut error);
+        
+        assert!(result.is_null(), "Should fail to parse");
+        assert!(!error.is_null(), "Should have error message");
+        
+        let error_msg = CStr::from_ptr(error).to_str().unwrap();
+        println!("Error message: {}", error_msg);
+        assert!(error_msg.contains("Parse error"));
+        
+        chameleon_free_string(error);
     }
 }
