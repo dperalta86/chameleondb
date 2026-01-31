@@ -1,11 +1,10 @@
 <div align="center">
 
-<img src="https://ibb.co/zhnxLk3B" alt="ChameleonDB Logo" width="200" height="auto">
+![CharmeleonDB](docs/logo-200x150.png)
 
 
 *A modern, type-safe, graph-oriented database access language*
 
-[![Build Status](https://github.com/dperalta86/chameleondb/CI)](https://github.com/dperalta86/chameleondb/actions)
 [![License: Apache](https://img.shields.io/badge/license-Apache%20License%202.0-blue)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Rust Version](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![Go Version](https://img.shields.io/badge/go-1.21%2B-00ADD8.svg)](https://golang.org)
