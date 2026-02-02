@@ -1,0 +1,26 @@
+entity User {
+    id: uuid primary,
+    email: string unique,
+    name: string,
+    age: int nullable,
+    created_at: timestamp default now(),
+    orders: [Order] via user_id,
+}
+
+entity Order {
+    id: uuid primary,
+    total: decimal,
+    status: string,
+    created_at: timestamp default now(),
+    user_id: uuid,
+    user: User,
+    items: [OrderItem] via order_id,
+}
+
+entity OrderItem {
+    id: uuid primary,
+    quantity: int,
+    price: decimal,
+    order_id: uuid,
+    order: Order,
+}

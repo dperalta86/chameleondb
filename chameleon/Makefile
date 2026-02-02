@@ -21,6 +21,33 @@ test: build-rust
 	LD_LIBRARY_PATH=$(RUST_LIB_DIR) \
 	go test -v ./...
 
+.PHONY: test-integration
+test-integration:
+	@echo "Building Rust library..."
+	cd ../chameleon-core && cargo build --release
+	@echo "Starting test containers..."
+	docker compose -f docker-compose.test.yml up -d
+	@echo "Waiting for PostgreSQL..."
+	@sleep 5
+	@echo "Running integration tests..."
+	CGO_LDFLAGS="-L$(shell pwd)/../chameleon-core/target/release -lchameleon_core" \
+	CGO_CFLAGS="-I$(shell pwd)/../chameleon-core/include" \
+	LD_LIBRARY_PATH=$(shell pwd)/../chameleon-core/target/release \
+	go test -v ./tests/integration/... -timeout 60s || (docker compose -f docker-compose.test.yml down && exit 1)
+	@echo "Stopping test containers..."
+	docker compose -f docker-compose.test.yml down
+
+.PHONY: test-all
+test-all: test test-integration
+
+.PHONY: docker-up
+docker-up:
+	docker compose -f docker-compose.test.yml up -d
+
+.PHONY: docker-down
+docker-down:
+	docker compose -f docker-compose.test.yml down -v
+
 # Clean builds
 clean:
 	rm -rf bin/

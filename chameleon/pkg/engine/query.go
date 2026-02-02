@@ -185,7 +185,6 @@ func (qb *QueryBuilder) Execute(ctx context.Context) (*QueryResult, error) {
 }
 
 // --- Helpers ---
-
 func parseFieldPath(path string) FieldPath {
 	return FieldPath{Segments: splitPath(path)}
 }

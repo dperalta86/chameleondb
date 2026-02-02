@@ -86,6 +86,14 @@ func (e *Engine) IsConnected() bool {
 	return e.connector != nil && e.connector.IsConnected()
 }
 
+// Ping verifies the database connection is alive
+func (e *Engine) Ping(ctx context.Context) error {
+	if e.connector == nil {
+		return fmt.Errorf("not connected")
+	}
+	return e.connector.Ping(ctx)
+}
+
 // GenerateMigration generates DDL SQL from the loaded schema
 func (e *Engine) GenerateMigration() (string, error) {
 	if e.schema == nil {

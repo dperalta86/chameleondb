@@ -105,21 +105,41 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 	return result, nil
 }
 
-// extractIDs pulls a specific field from all rows
+// extractIDs pulls a specific field from all rows and converts to string if needed
 func extractIDs(rows []Row, field string) []interface{} {
 	ids := make([]interface{}, 0, len(rows))
 	for _, row := range rows {
 		if id, ok := row[field]; ok {
-			ids = append(ids, id)
+			// Convert UUID types to string
+			switch v := id.(type) {
+			case []byte:
+				ids = append(ids, string(v))
+			case [16]byte: // PostgreSQL UUID type
+				// Convert to standard UUID string format
+				ids = append(ids, uuidToString(v))
+			case string:
+				ids = append(ids, v)
+			default:
+				ids = append(ids, id)
+			}
 		}
 	}
 	return ids
 }
 
+// uuidToString converts a [16]byte UUID to standard string format
+func uuidToString(uuid [16]byte) string {
+	return fmt.Sprintf("%x-%x-%x-%x-%x",
+		uuid[0:4],
+		uuid[4:6],
+		uuid[6:8],
+		uuid[8:10],
+		uuid[10:16])
+}
+
 // replacePlaceholder replaces $PARENT_IDS with actual IN clause values
 func replacePlaceholder(sql string, ids []interface{}) (string, error) {
 	if len(ids) == 0 {
-		// No parent IDs → return a query that matches nothing
 		return strings.Replace(sql, "$PARENT_IDS", "NULL", 1), nil
 	}
 
@@ -127,9 +147,16 @@ func replacePlaceholder(sql string, ids []interface{}) (string, error) {
 	for i, id := range ids {
 		switch v := id.(type) {
 		case string:
-			placeholders[i] = fmt.Sprintf("'%s'", v)
+			// Escape single quotes and wrap in quotes
+			escaped := strings.ReplaceAll(v, "'", "''")
+			placeholders[i] = fmt.Sprintf("'%s'", escaped)
+		case int, int32, int64, uint, uint32, uint64:
+			placeholders[i] = fmt.Sprintf("%d", v)
+		case float32, float64:
+			placeholders[i] = fmt.Sprintf("%f", v)
 		default:
-			placeholders[i] = fmt.Sprintf("%v", v)
+			// Fallback: convert to string and quote
+			placeholders[i] = fmt.Sprintf("'%v'", v)
 		}
 	}
 
