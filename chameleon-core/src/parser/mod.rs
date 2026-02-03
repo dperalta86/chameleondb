@@ -1,5 +1,5 @@
 use crate::ast::Schema;
-use crate::error::ChameleonError;
+use crate::error::{ChameleonError, ParseErrorDetail};
 
 // Incluir el módulo parser generado por lalrpop
 #[allow(clippy::all)]
@@ -11,9 +11,121 @@ pub mod schema {
 }
 
 pub fn parse_schema(input: &str) -> Result<Schema, ChameleonError> {
-    schema::SchemaParser::new()
-        .parse(input)
-        .map_err(|e| ChameleonError::ParseError(format!("{:?}", e)))
+    match schema::SchemaParser::new().parse(input) {
+        Ok(schema) => Ok(schema),
+        Err(e) => {
+            let err: ChameleonError = e.into();
+            Err(enhance_parse_error(err, input))
+        }
+    }
+}
+
+/// Convert byte offset to (line, column) in source text
+fn offset_to_position(source: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut column = 1;
+    
+    for (i, ch) in source.chars().enumerate() {
+        if i >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    
+    (line, column)
+}
+
+/// Extract a snippet of source code around a position
+fn extract_snippet(source: &str, line: usize, column: usize) -> String {
+    let lines: Vec<&str> = source.lines().collect();
+    
+    if line == 0 || line > lines.len() {
+        return String::new();
+    }
+    
+    let target_line = lines[line - 1];
+    let mut snippet = String::new();
+    
+    // Show the line with the error
+    snippet.push_str(&format!("{:4} │ {}\n", line, target_line));
+    
+    // Show the error pointer
+    snippet.push_str("     │ ");
+    for _ in 0..(column - 1) {
+        snippet.push(' ');
+    }
+    snippet.push_str("^");
+    
+    snippet
+}
+
+/// Enhance parse error with source context
+fn enhance_parse_error(
+    err: ChameleonError, 
+    source: &str
+) -> ChameleonError {
+    match err {
+        ChameleonError::ParseError(mut detail) => {
+            // If we have a column but line is 1, we need to recalculate
+            if detail.line == 1 && detail.column > 1 {
+                let (line, col) = offset_to_position(source, detail.column - 1);
+                detail.line = line;
+                detail.column = col;
+            }
+            
+            // Add snippet
+            let snippet = extract_snippet(source, detail.line, detail.column);
+            detail.snippet = Some(snippet);
+            
+            // Add suggestions based on common mistakes
+            detail = add_suggestions(detail);
+            
+            ChameleonError::ParseError(detail)
+        }
+        other => other,
+    }
+}
+
+/// Add helpful suggestions based on error patterns
+fn add_suggestions(mut detail: ParseErrorDetail) -> ParseErrorDetail {
+    // Check for common typos in keywords
+    if let Some(token) = &detail.token {
+        let token_lower: String = token.to_lowercase();
+        
+        if token_lower.contains("entiy") || token_lower.contains("enity") {
+            detail.suggestion = Some("Did you mean 'entity'?".to_string());
+        } else if token_lower.contains("primry") || token_lower.contains("pirmary") {
+            detail.suggestion = Some("Did you mean 'primary'?".to_string());
+        } else if token_lower.contains("uniqu") && !token_lower.contains("unique") {
+            detail.suggestion = Some("Did you mean 'unique'?".to_string());
+        } else if token_lower.contains("nullabe") {
+            detail.suggestion = Some("Did you mean 'nullable'?".to_string());
+        }
+    }
+    
+    // Check for common syntax mistakes
+    if detail.message.contains("expected one of") {
+        if detail.message.contains("\":\"") || detail.message.contains("Colon") {
+            if detail.suggestion.is_none() {
+                detail.suggestion = Some(
+                    "Fields must have a type after the colon.\nExample: name: string".to_string()
+                );
+            }
+        } else if detail.message.contains("\"{\"") {
+            if detail.suggestion.is_none() {
+                detail.suggestion = Some(
+                    "Entity definitions must have an opening brace.\nExample: entity User {".to_string()
+                );
+            }
+        }
+    }
+    
+    detail
 }
 
 #[cfg(test)]

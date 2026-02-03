@@ -40,8 +40,12 @@ Examples:
 		if err != nil {
 			printError("Validation failed")
 			fmt.Println()
-			fmt.Println(err.Error())
-			fmt.Println()
+
+			// Try to format as structured error
+			errStr := err.Error()
+			formatted := engine.FormatError(errStr)
+			fmt.Println(formatted)
+
 			return fmt.Errorf("schema validation failed")
 		}
 
