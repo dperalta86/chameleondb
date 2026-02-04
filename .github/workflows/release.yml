@@ -65,7 +65,7 @@ jobs:
       - name: Package artifact
         shell: bash
         run: |
-          mkdir dist
+          mkdir -p dist
           if [ "${{ matrix.target }}" = "windows" ]; then
             cp chameleon/chameleon.exe dist/
             cd dist && zip chameleon-windows-amd64.zip chameleon.exe
