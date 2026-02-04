@@ -9,7 +9,7 @@
 [![Rust Version](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![Go Version](https://img.shields.io/badge/go-1.21%2B-00ADD8.svg)](https://golang.org)
 
-[Documentation](https://docs.chameleondb.dev) • [Examples](./examples) • [Contributing](./CONTRIBUTING.md) • [Roadmap](#roadmap)
+[Documentation](https://www.chameleon-web.vervel.app/docs) • [Examples](./examples) • [Contributing](./CONTRIBUTING.md) • [Roadmap](#roadmap)
 
 </div>
 
@@ -77,7 +77,7 @@ db.users()
 
 ```bash
 # Clone the repository
-git clone https://github.com/dperalta86/chameleondb.git
+git clone https://github.com/chameleon-db/chameleondb.git
 cd chameleondb
 
 # Build Rust core
@@ -145,7 +145,7 @@ From Go:
 ```go
 package main
 
-import "github.com/dperalta86/chameleondb/pkg/engine"
+import "github.com/chameleon-db/chameleondb/pkg/engine"
 
 func main() {
     db := engine.Connect("postgresql://localhost/mydb")
@@ -314,12 +314,12 @@ chameleon/
 
 ## Roadmap
 
-### Phase 1: Foundation (Q1 2026) - **IN PROGRESS**
+### Phase 1: Foundation (Q1 2026) - **TESTING**
 - ✅ Project setup
-- 🔄 Schema parser
-- 🔄 Basic type checker
-- ⏳ FFI bridge
-- ⏳ PostgreSQL connector
+- ✅ Schema parser
+- ✅ Basic type checker
+- ✅ FFI bridge
+- ✅ PostgreSQL connector
 
 ### Phase 2: Type Safety (Q2 2026)
 - Code generation
@@ -363,7 +363,7 @@ We welcome contributions! chameleonDB is in early stages and there's plenty to d
 
 ```bash
 # Clone your fork
-git clone https://github.com/dperalta86/chameleondb.git
+git clone https://github.com/chameleon-db/chameleondb.git
 cd chameleondb
 
 # Set up Rust environment
@@ -395,10 +395,9 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines.
 
 ## Community
 
-- **GitHub Discussions**: [Ask questions, share ideas](https://github.com/dperalta86/chameleondb/discussions)
-- **Discord**: [Join our server](https://discord.gg/chameleondb)
+- **GitHub Discussions**: [Ask questions, share ideas](https://github.com/chameleon-db/chameleondb/discussions)
+- **Discord**: [Join our server](https://discord.gg/tyZNY2xmr)
 - **Twitter**: [@chameleonDB](https://twitter.com/chameleondb)
-- **Blog**: [dev.to/chameleondb](https://dev.to/chameleondb)
 
 ---
 
@@ -448,7 +447,7 @@ chameleonDB is inspired by:
 - **LINQ** - Composable query syntax
 - **EdgeDB** - Rethinking database access
 
-Special thanks to all [contributors](https://github.com/yourusername/chameleon/graphs/contributors)!
+Special thanks to all [contributors](https://github.com/chameleon-db/chameleon/graphs/contributors)!
 
 ---
 
@@ -468,6 +467,6 @@ If you find chameleonDB useful, please consider:
 
 **Built with ❤️ by developers, for developers**
 
-[Website](https://chameleondb.dev) • [Documentation](https://docs.chameleondb.dev) • [GitHub](https://github.com/yourusername/chameleon)
+[Website](https://chameleondb-web.vercel.app) • [Documentation](https://chameleondb-web.vercel.app/docs) • [GitHub](https://github.com/chameleon-db/chameleon)
 
 </div>
