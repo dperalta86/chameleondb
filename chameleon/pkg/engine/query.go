@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dperalta86/chameleondb/chameleon/internal/ffi"
+	"github.com/chameleon-db/chameleondb/chameleon/internal/ffi"
 )
 
 // --- Query types (mirror Rust Query AST) ---

@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/dperalta86/chameleondb/chameleon/pkg/engine"
+	"github.com/chameleon-db/chameleondb/chameleon/pkg/engine"
 	"github.com/spf13/cobra"
 )
 

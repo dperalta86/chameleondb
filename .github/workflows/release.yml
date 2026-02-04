@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux
+            ext: tar.gz
+          - os: macos-12
+            target: darwin
+            ext: tar.gz
+          - os: windows-2022
+            target: windows
+            ext: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Build Rust core
+        run: |
+          cd chameleon-core
+          cargo build --release
+
+      - name: Build Go CLI (Unix)
+        if: matrix.target != 'windows'
+        run: |
+          cd chameleon
+          export RUST_LIB_DIR="$PWD/../chameleon-core/target/release"
+          export RUST_INCLUDE_DIR="$PWD/../chameleon-core/include"
+          export CGO_ENABLED=1
+          export CGO_LDFLAGS="-L$RUST_LIB_DIR -lchameleon_core"
+          export CGO_CFLAGS="-I$RUST_INCLUDE_DIR"
+          go build -o chameleon ./cmd/chameleon
+
+      - name: Build Go CLI (Windows)
+        if: matrix.target == 'windows'
+        shell: bash
+        run: |
+          cd chameleon
+          export RUST_LIB_DIR="$PWD/../chameleon-core/target/release"
+          export RUST_INCLUDE_DIR="$PWD/../chameleon-core/include"
+          export CGO_ENABLED=1
+          export CGO_LDFLAGS="-L$RUST_LIB_DIR -lchameleon_core"
+          export CGO_CFLAGS="-I$RUST_INCLUDE_DIR"
+          go build -o chameleon.exe ./cmd/chameleon
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          mkdir dist
+          if [ "${{ matrix.target }}" = "windows" ]; then
+            cp chameleon/chameleon.exe dist/
+            cd dist && zip chameleon-windows-amd64.zip chameleon.exe
+          else
+            cp chameleon/chameleon dist/
+            cd dist && tar -czf chameleon-${{ matrix.target }}-amd64.tar.gz chameleon
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chameleon-${{ matrix.target }}
+          path: dist/*
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-22.04
+    needs: build
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -type f -exec sha256sum {} \; > SHA256SUMS
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/**/*
+          generate_release_notes: true

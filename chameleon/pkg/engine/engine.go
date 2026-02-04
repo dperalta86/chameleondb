@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dperalta86/chameleondb/chameleon/internal/ffi"
+	"github.com/chameleon-db/chameleondb/chameleon/internal/ffi"
 )
 
 // Engine is the main entry point for ChameleonDB

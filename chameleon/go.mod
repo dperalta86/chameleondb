@@ -1,4 +1,4 @@
-module github.com/dperalta86/chameleondb/chameleon
+module github.com/chameleon-db/chameleondb/chameleon
 
 go 1.25.6
 
