@@ -41,10 +41,11 @@ char *chameleon_parse_schema(const char *input, char **error_out);
 
 /**
  * Validate a schema (checks relations, constraints, etc.)
+ * Returns JSON with structured errors
  *
  * # Safety
- * - `schema_json` must be a valid null-terminated C string containing JSON
- * - Returns ChameleonResult::Ok on success
+ * - `input` must be a valid null-terminated C string containing schema DSL
+ * - Caller must free the returned string with `chameleon_free_string`
  */
 enum ChameleonResult chameleon_validate_schema(const char *input, char **error_out);
 

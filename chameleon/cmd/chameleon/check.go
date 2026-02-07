@@ -126,48 +126,55 @@ type CheckResult struct {
 }
 
 func printCheckErrors(filename string, rawErrMsg string) error {
-	var errors []CheckError
+	var result struct {
+		Valid  bool `json:"valid"`
+		Errors []struct {
+			Kind       string  `json:"kind"`
+			Message    string  `json:"message"`
+			Line       *int    `json:"line"`
+			Column     *int    `json:"column"`
+			Snippet    *string `json:"snippet"`
+			Suggestion *string `json:"suggestion"`
+		} `json:"errors"`
+	}
 
-	// Try to parse as ChameleonError
-	var chErr engine.ChameleonError
-	if jsonErr := json.Unmarshal([]byte(rawErrMsg), &chErr); jsonErr == nil {
-		// Successfully parsed as ChameleonError
-		if chErr.Kind == "ParseError" {
-			errors = append(errors, CheckError{
-				Message:    chErr.Data.Message,
-				Line:       chErr.Data.Line,
-				Column:     chErr.Data.Column,
-				File:       filename,
-				Severity:   "error",
-				Snippet:    chErr.Data.Snippet,
-				Suggestion: chErr.Data.Suggestion,
-			})
-		} else {
-			// Other error types
-			errors = append(errors, CheckError{
-				Message:  rawErrMsg,
-				Line:     1,
-				Column:   1,
+	// Try to parse as JSON first
+	if err := json.Unmarshal([]byte(rawErrMsg), &result); err == nil && !result.Valid {
+		// Successfully parsed as validation JSON
+		var errors []CheckError
+		for _, err := range result.Errors {
+			checkErr := CheckError{
+				Message:  err.Message,
 				File:     filename,
 				Severity: "error",
-			})
+			}
+			if err.Line != nil {
+				checkErr.Line = *err.Line
+			} else {
+				checkErr.Line = 1
+			}
+			if err.Column != nil {
+				checkErr.Column = *err.Column
+			} else {
+				checkErr.Column = 1
+			}
+			if err.Snippet != nil {
+				checkErr.Snippet = err.Snippet
+			}
+			if err.Suggestion != nil {
+				checkErr.Suggestion = err.Suggestion
+			}
+			errors = append(errors, checkErr)
 		}
-	} else {
-		// Plain error message (fallback)
-		errors = append(errors, CheckError{
-			Message:  rawErrMsg,
-			Line:     1,
-			Column:   1,
-			File:     filename,
-			Severity: "error",
-		})
-	}
 
-	result := CheckResult{
-		Valid:  false,
-		Errors: errors,
+		output := CheckResult{
+			Valid:  false,
+			Errors: errors,
+		}
+		data, _ := json.MarshalIndent(output, "", "  ")
+		fmt.Println(string(data))
+		return nil
 	}
-
 	output, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(output))
 	return nil

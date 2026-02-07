@@ -89,11 +89,36 @@ pub unsafe extern "C" fn chameleon_parse_schema(
     }
 }
 
+use serde::Serialize;
+
+/// Structured validation error for JSON output
+#[derive(Serialize)]
+struct ValidationErrorJson {
+    kind: String,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    column: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snippet: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggestion: Option<String>,
+}
+
+/// Structured validation result for JSON output
+#[derive(Serialize)]
+struct ValidationResultJson {
+    valid: bool,
+    errors: Vec<ValidationErrorJson>,
+}
+
 /// Validate a schema (checks relations, constraints, etc.)
+/// Returns JSON with structured errors
 /// 
 /// # Safety
-/// - `schema_json` must be a valid null-terminated C string containing JSON
-/// - Returns ChameleonResult::Ok on success
+/// - `input` must be a valid null-terminated C string containing schema DSL
+/// - Caller must free the returned string with `chameleon_free_string`
 #[no_mangle]
 pub unsafe extern "C" fn chameleon_validate_schema(
     input: *const c_char,
@@ -112,38 +137,110 @@ pub unsafe extern "C" fn chameleon_validate_schema(
         }
     };
 
+    let mut validation_errors: Vec<ValidationErrorJson> = Vec::new();
+
+    // Parse schema
     match crate::parser::parse_schema(c_str) {
         Ok(schema) => {
             // Type check the schema
             let result = crate::typechecker::type_check(&schema);
             
             if result.errors.is_empty() {
-                ChameleonResult::Ok
-            } else {
-                // Format validation errors
-                let mut error_msg = String::from("validation error: ❌ Found ");
-                error_msg.push_str(&format!("{} error(s):\n\n", result.errors.len()));
+                // Success - return valid JSON
+                let result_json = ValidationResultJson {
+                    valid: true,
+                    errors: vec![],
+                };
                 
-                for (i, err) in result.errors.iter().enumerate() {
-                    error_msg.push_str(&format!("  {}. {}\n", i + 1, err));
+                let json = serde_json::to_string(&result_json)
+                    .unwrap_or_else(|_| r#"{"valid":true,"errors":[]}"#.to_string());
+                
+                match CString::new(json) {
+                    Ok(c_str) => {
+                        *error_out = c_str.into_raw();
+                        return ChameleonResult::Ok;
+                    }
+                    Err(_) => {
+                        set_error(error_out, "Failed to convert JSON to C string");
+                        return ChameleonResult::InternalError;
+                    }
+                }
+            } else {
+                // Validation errors - build structured response
+                for err in result.errors {
+                    validation_errors.push(ValidationErrorJson {
+                        kind: "ValidationError".to_string(),
+                        message: err.to_string(),
+                        line: None,
+                        column: None,
+                        snippet: None,
+                        suggestion: None,
+                    });
                 }
                 
-                set_error(error_out, &error_msg);
-                ChameleonResult::ValidationError
+                let result_json = ValidationResultJson {
+                    valid: false,
+                    errors: validation_errors,
+                };
+                
+                let json = serde_json::to_string(&result_json)
+                    .unwrap_or_else(|_| r#"{"valid":false,"errors":[]}"#.to_string());
+                
+                match CString::new(json) {
+                    Ok(c_str) => {
+                        *error_out = c_str.into_raw();
+                        return ChameleonResult::ValidationError;
+                    }
+                    Err(_) => {
+                        set_error(error_out, "Failed to convert JSON to C string");
+                        return ChameleonResult::InternalError;
+                    }
+                }
             }
         }
         Err(e) => {
-            // Serialize structured error if it's a ParseError
-            let error_msg = match &e {
+            // Parse error - extract details if available
+            match &e {
                 ChameleonError::ParseError(detail) => {
-                    // Return as JSON for structured handling
-                    serde_json::to_string(detail).unwrap_or_else(|_| e.to_string())
+                    validation_errors.push(ValidationErrorJson {
+                        kind: "ParseError".to_string(),
+                        message: detail.message.clone(),
+                        line: Some(detail.line),
+                        column: Some(detail.column),
+                        snippet: detail.snippet.clone(),
+                        suggestion: detail.suggestion.clone(),
+                    });
                 }
-                _ => format!("parse error: {}", e),
+                _ => {
+                    validation_errors.push(ValidationErrorJson {
+                        kind: "ParseError".to_string(),
+                        message: e.to_string(),
+                        line: None,
+                        column: None,
+                        snippet: None,
+                        suggestion: None,
+                    });
+                }
+            }
+            
+            let result_json = ValidationResultJson {
+                valid: false,
+                errors: validation_errors,
             };
             
-            set_error(error_out, &error_msg);
-            ChameleonResult::ParseError
+            let json = serde_json::to_string(&result_json)
+                .unwrap_or_else(|_| r#"{"valid":false,"errors":[]}"#.to_string());
+            
+            match CString::new(json) {
+                Ok(c_str) => {
+                    *error_out = c_str.into_raw();
+                    return ChameleonResult::ParseError;
+                }
+                Err(_) => {
+                    set_error(error_out, "Failed to convert JSON to C string");
+                    return ChameleonResult::InternalError;
+                }
+            }
         }
     }
 }

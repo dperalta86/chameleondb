@@ -76,9 +76,15 @@ func formatParseError(detail ParseErrorDetail) string {
 
 // LoadSchemaFromStringRaw loads schema and returns raw error (no formatting)
 func (e *Engine) LoadSchemaFromStringRaw(input string) (*Schema, string, error) {
+	// 1. Validate schema (handles BOTH parse errors and type check errors)
+	rawErr, err := ffi.ValidateSchemaRaw(input)
+	if err != nil {
+		return nil, rawErr, err
+	}
+
+	// 2. If validation passed, parse schema
 	schemaJSON, err := ffi.ParseSchema(input)
 	if err != nil {
-		// Return raw error message without formatting
 		return nil, err.Error(), err
 	}
 

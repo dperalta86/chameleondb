@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -34,23 +35,50 @@ Examples:
 
 		printInfo("Validating %s...", schemaFile)
 
-		// Load and validate
+		// Read file content
+		content, err := os.ReadFile(schemaFile)
+		if err != nil {
+			return fmt.Errorf("failed to read file: %w", err)
+		}
+
+		// Validate using LoadSchemaFromStringRaw
 		eng := engine.NewEngine()
-		_, err := eng.LoadSchemaFromFile(schemaFile)
+		_, rawErr, err := eng.LoadSchemaFromStringRaw(string(content))
+
 		if err != nil {
 			printError("Validation failed")
 			fmt.Println()
 
-			// Try to format as structured error
-			errStr := err.Error()
-			formatted := engine.FormatError(errStr)
-			fmt.Println(formatted)
+			// Try to parse as ValidationResultJson
+			var validationResult struct {
+				Valid  bool `json:"valid"`
+				Errors []struct {
+					Message    string  `json:"message"`
+					Snippet    *string `json:"snippet"`
+					Suggestion *string `json:"suggestion"`
+				} `json:"errors"`
+			}
+
+			if jsonErr := json.Unmarshal([]byte(rawErr), &validationResult); jsonErr == nil {
+				for _, errItem := range validationResult.Errors {
+					fmt.Println(errItem.Message)
+					if errItem.Snippet != nil {
+						fmt.Println(*errItem.Snippet)
+					}
+					if errItem.Suggestion != nil {
+						fmt.Println("Help: " + *errItem.Suggestion)
+					}
+				}
+			} else {
+				// Fallback: try to format as old error format
+				formatted := engine.FormatError(rawErr)
+				fmt.Println(formatted)
+			}
 
 			return fmt.Errorf("schema validation failed")
 		}
 
 		printSuccess("Schema is valid")
-
 		if verbose {
 			fmt.Println("\nValidation checks passed:")
 			fmt.Println("  ✓ Syntax is correct")
@@ -59,7 +87,6 @@ Examples:
 			fmt.Println("  ✓ Primary keys are defined")
 			fmt.Println("  ✓ No circular dependencies")
 		}
-
 		return nil
 	},
 }

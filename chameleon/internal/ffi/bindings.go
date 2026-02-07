@@ -22,6 +22,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"os"
 	"unsafe"
 )
 
@@ -80,6 +81,36 @@ func ValidateSchema(schemaJSON string) error {
 	}
 
 	return nil
+}
+
+// ValidateSchemaRaw validates schema and returns structured JSON errors
+func ValidateSchemaRaw(schemaInput string) (string, error) {
+	cInput := C.CString(schemaInput)
+	defer C.free(unsafe.Pointer(cInput))
+	var cError *C.char
+	defer func() {
+		if cError != nil {
+			C.chameleon_free_string(cError)
+		}
+	}()
+
+	result := C.chameleon_validate_schema(cInput, &cError)
+
+	if cError != nil {
+		errMsg := C.GoString(cError)
+		if os.Getenv("DEBUG") == "1" {
+			fmt.Fprintf(os.Stderr, "DEBUG ValidateSchemaRaw: result=%d, errMsg=%q\n", result, errMsg)
+		}
+		if result == ResultOk {
+			return errMsg, nil
+		}
+		return errMsg, errors.New("validation failed")
+	}
+
+	if os.Getenv("DEBUG") == "1" {
+		fmt.Fprintf(os.Stderr, "DEBUG ValidateSchemaRaw: cError is nil, result=%d\n", result)
+	}
+	return "", errors.New("unknown error")
 }
 
 // Version returns the Rust core library version
