@@ -149,3 +149,38 @@ func ParseConnectionString(connStr string) (ConnectorConfig, error) {
 
 	return config, nil
 }
+
+// Query executes a SQL query and returns rows
+func (c *Connector) Query(ctx context.Context, sql string) ([]map[string]interface{}, error) {
+	if !c.IsConnected() {
+		return nil, fmt.Errorf("not connected to database")
+	}
+
+	rows, err := c.pool.Query(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []map[string]interface{}
+	columns := rows.FieldDescriptions()
+
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		row := make(map[string]interface{})
+		for i, col := range columns {
+			row[col.Name] = values[i]
+		}
+		result = append(result, row)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}

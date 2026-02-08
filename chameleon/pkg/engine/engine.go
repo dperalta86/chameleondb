@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"unsafe"
 
 	"github.com/chameleon-db/chameleondb/chameleon/internal/ffi"
 )
@@ -14,11 +15,27 @@ type Engine struct {
 	schema    *Schema
 	connector *Connector
 	executor  *Executor
+	ffiHandle unsafe.Pointer
+
+	// Debug context
+	Debug *DebugContext
 }
 
 // NewEngine creates a new ChameleonDB engine
 func NewEngine() *Engine {
-	return &Engine{}
+	return &Engine{
+		Debug: DefaultDebugContext(),
+	}
+}
+
+// WithDebug returns a new engine with debug enabled
+func (e *Engine) WithDebug(level DebugLevel) *Engine {
+	e.Debug = &DebugContext{
+		Level:       level,
+		Writer:      os.Stdout,
+		ColorOutput: true,
+	}
+	return e
 }
 
 // LoadSchemaFromString parses a schema from a string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/chameleon-db/chameleondb/chameleon/internal/ffi"
 )
@@ -73,8 +74,12 @@ type EagerQuery struct {
 
 // QueryBuilder provides a chainable API for building queries
 type QueryBuilder struct {
-	engine *Engine
-	query  QueryJSON
+	engine     *Engine
+	query      QueryJSON
+	entityName string
+
+	// Debug override (optional)
+	debugLevel *DebugLevel // nil = use engine default
 }
 
 // Query starts a new query for the given entity
@@ -177,11 +182,61 @@ func (qb *QueryBuilder) ToSQL() (*GeneratedSQL, error) {
 }
 
 // Execute generates SQL and runs it against the database
+// Execute generates SQL and runs it against the database
 func (qb *QueryBuilder) Execute(ctx context.Context) (*QueryResult, error) {
 	if qb.engine.executor == nil {
-		return nil, fmt.Errorf("not connected to database, call Engine.Connect() first")
+		return nil, fmt.Errorf("executor not initialized - call engine.Connect() first")
 	}
-	return qb.engine.executor.Execute(ctx, qb)
+
+	start := time.Now()
+
+	// Generate SQL
+	generated, err := qb.ToSQL()
+	if err != nil {
+		return nil, err
+	}
+
+	// Debug: Log SQL before execution
+	debugCtx := qb.getDebugContext()
+	debugCtx.LogSQL(generated.MainQuery)
+
+	// Execute via Executor (which handles everything: main query + eager loading)
+	result, err := qb.engine.executor.Execute(ctx, qb)
+	if err != nil {
+		return nil, err
+	}
+
+	// Debug: Log trace
+	duration := time.Since(start)
+	debugCtx.LogQuery(generated.MainQuery, duration, len(result.Rows))
+
+	return result, nil
+}
+
+// --- Debugging ---
+// Debug enables debug mode for this query
+func (qb *QueryBuilder) Debug() *QueryBuilder {
+	level := DebugSQL
+	qb.debugLevel = &level
+	return qb
+}
+
+// DebugTrace enables full trace for this query
+func (qb *QueryBuilder) DebugTrace() *QueryBuilder {
+	level := DebugTrace
+	qb.debugLevel = &level
+	return qb
+}
+
+func (qb *QueryBuilder) getDebugContext() *DebugContext {
+	if qb.debugLevel != nil {
+		return &DebugContext{
+			Level:       *qb.debugLevel,
+			Writer:      qb.engine.Debug.Writer,
+			ColorOutput: qb.engine.Debug.ColorOutput,
+		}
+	}
+	return qb.engine.Debug
 }
 
 // --- Helpers ---

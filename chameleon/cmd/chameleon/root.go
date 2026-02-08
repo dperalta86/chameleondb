@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 
+	"github.com/chameleon-db/chameleondb/chameleon/pkg/engine"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -60,4 +61,13 @@ func printWarning(format string, args ...interface{}) {
 
 func printInfo(format string, args ...interface{}) {
 	infoColor.Printf("ℹ "+format+"\n", args...)
+}
+
+func getConfigFromEnv() engine.ConnectorConfig {
+	config, err := LoadConnectorConfig()
+	if err != nil {
+		printWarning("Could not read config: %v", err)
+		return engine.DefaultConfig()
+	}
+	return config
 }
