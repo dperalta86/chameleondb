@@ -14,11 +14,11 @@ import (
 // testConfig returns config for the test database
 func testConfig() engine.ConnectorConfig {
 	return engine.ConnectorConfig{
-		Host:     getEnv("TEST_DB_HOST", "localhost"),
-		Port:     getEnvInt("TEST_DB_PORT", 5433),
-		Database: getEnv("TEST_DB_NAME", "chameleon_test"),
-		User:     getEnv("TEST_DB_USER", "chameleon"),
-		Password: getEnv("TEST_DB_PASS", "chameleon_test_pass"),
+		Host:     getEnv("CHAMELEON_TEST_DB_HOST", "localhost"),
+		Port:     getEnvInt("CHAMELEON_TEST_DB_PORT", 5433),
+		Database: getEnv("CHAMELEON_TEST_DB_NAME", "chameleon_test"),
+		User:     getEnv("CHAMELEON_TEST_DB_USER", "postgres"),
+		Password: getEnv("CHAMELEON_TEST_DB_PASS", "postgres"),
 		MaxConns: 5,
 		MinConns: 1,
 	}
@@ -109,20 +109,27 @@ func runMigration(t *testing.T, eng *engine.Engine, ctx context.Context) {
 
 	sql, err := eng.GenerateMigration()
 	if err != nil {
-		t.Fatalf("Failed to generate migration: %v", err)
+		t.Fatalf("failed to generate migration: %v", err)
 	}
 
-	// Execute migration
-	connStr := testConfig().ConnectionString()
-	conn, err := pgx.Connect(ctx, connStr)
+	conn, err := pgx.Connect(ctx, testConfig().ConnectionString())
 	if err != nil {
-		t.Fatalf("Failed to connect for migration: %v", err)
+		t.Fatalf("failed to connect for migration: %v", err)
 	}
 	defer conn.Close(ctx)
 
-	_, err = conn.Exec(ctx, sql)
+	tx, err := conn.Begin(ctx)
 	if err != nil {
-		t.Fatalf("Failed to execute migration: %v\n%s", err, sql)
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+
+	if _, err := tx.Exec(ctx, sql); err != nil {
+		tx.Rollback(ctx)
+		t.Fatalf("migration failed:\n%v\nSQL:\n%s", err, sql)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("failed to commit migration: %v", err)
 	}
 }
 
@@ -189,4 +196,22 @@ func skipIfNoDocker(t *testing.T) {
 		t.Skipf("Docker not available or test DB not running: %v", err)
 	}
 	conn.Close(ctx)
+}
+
+func cleanupDatabase(t *testing.T, ctx context.Context, config engine.ConnectorConfig) {
+	t.Helper()
+
+	conn, err := pgx.Connect(ctx, config.ConnectionString())
+	if err != nil {
+		t.Fatalf("cleanup failed to connect: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	_, err = conn.Exec(ctx, `
+		DROP SCHEMA public CASCADE;
+		CREATE SCHEMA public;
+	`)
+	if err != nil {
+		t.Fatalf("cleanup failed: %v", err)
+	}
 }

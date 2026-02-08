@@ -1,5 +1,18 @@
 .PHONY: build test clean run-parse run-validate
 
+# Env variables for tests
+TEST_DB_HOST ?= localhost
+TEST_DB_PORT ?= 5433
+TEST_DB_NAME ?= chameleon_test
+TEST_DB_USER ?= postgres
+TEST_DB_PASS ?= postgres
+
+export CHAMELEON_TEST_DB_HOST=$(TEST_DB_HOST)
+export CHAMELEON_TEST_DB_PORT=$(TEST_DB_PORT)
+export CHAMELEON_TEST_DB_NAME=$(TEST_DB_NAME)
+export CHAMELEON_TEST_DB_USER=$(TEST_DB_USER)
+export CHAMELEON_TEST_DB_PASS=$(TEST_DB_PASS)
+
 # Paths
 RUST_LIB_DIR := $(shell pwd)/../chameleon-core/target/release
 RUST_INCLUDE_DIR := $(shell pwd)/../chameleon-core/include
@@ -25,17 +38,23 @@ test: build-rust
 test-integration:
 	@echo "Building Rust library..."
 	cd ../chameleon-core && cargo build --release
+
 	@echo "Starting test containers..."
 	docker compose -f docker-compose.test.yml up -d
+
 	@echo "Waiting for PostgreSQL..."
-	@sleep 5
+	@sleep 8
+
 	@echo "Running integration tests..."
 	CGO_LDFLAGS="-L$(shell pwd)/../chameleon-core/target/release -lchameleon_core" \
 	CGO_CFLAGS="-I$(shell pwd)/../chameleon-core/include" \
 	LD_LIBRARY_PATH=$(shell pwd)/../chameleon-core/target/release \
-	go test -v ./tests/integration/... -timeout 60s || (docker compose -f docker-compose.test.yml down && exit 1)
+	go test -v ./tests/integration/... -timeout 60s || \
+	(docker compose -f docker-compose.test.yml down && exit 1)
+
 	@echo "Stopping test containers..."
 	docker compose -f docker-compose.test.yml down
+
 
 .PHONY: test-all
 test-all: test test-integration

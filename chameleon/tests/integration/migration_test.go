@@ -138,3 +138,69 @@ func TestMigrationCreatesUniqueConstraints(t *testing.T) {
 		t.Error("users.email has no unique constraint")
 	}
 }
+
+func TestMigrationIsIdempotent(t *testing.T) {
+	skipIfNoDocker(t)
+
+	eng, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	runMigration(t, eng, ctx)
+	runMigration(t, eng, ctx) // no debe fallar
+}
+
+func TestOrdersUserForeignKeyIsCorrect(t *testing.T) {
+	skipIfNoDocker(t)
+
+	eng, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	runMigration(t, eng, ctx)
+
+	conn, _ := pgx.Connect(ctx, testConfig().ConnectionString())
+	defer conn.Close(ctx)
+
+	var count int
+	err := conn.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+		  ON tc.constraint_name = kcu.constraint_name
+		JOIN information_schema.constraint_column_usage ccu
+		  ON ccu.constraint_name = tc.constraint_name
+		WHERE tc.table_name = 'orders'
+		  AND tc.constraint_type = 'FOREIGN KEY'
+		  AND kcu.column_name = 'user_id'
+		  AND ccu.table_name = 'users'
+		  AND ccu.column_name = 'id'
+	`).Scan(&count)
+
+	if err != nil {
+		t.Fatalf("failed to inspect foreign key: %v", err)
+	}
+
+	if count != 1 {
+		t.Fatalf("expected exactly 1 FK orders.user_id → users.id, got %d", count)
+	}
+}
+
+func TestForeignKeyIsEnforced(t *testing.T) {
+	skipIfNoDocker(t)
+
+	eng, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	runMigration(t, eng, ctx)
+
+	conn, _ := pgx.Connect(ctx, testConfig().ConnectionString())
+	defer conn.Close(ctx)
+
+	_, err := conn.Exec(ctx, `
+		INSERT INTO orders (id, total, user_id)
+		VALUES ('00000000-0000-0000-0000-000000000000', 10, '99999999-9999-9999-9999-999999999999')
+	`)
+
+	if err == nil {
+		t.Fatal("expected FK violation, got nil error")
+	}
+}

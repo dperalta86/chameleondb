@@ -4,6 +4,83 @@ import (
 	"testing"
 )
 
+func TestQueryFilterIsNull(t *testing.T) {
+	skipIfNoDocker(t)
+
+	eng, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	runMigration(t, eng, ctx)
+	insertTestData(t, ctx, testConfig())
+
+	result, err := eng.Query("User").
+		Filter("age", "is_null", nil).
+		Execute(ctx)
+
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+
+	if result.Count() != 1 {
+		t.Fatalf("expected 1 user with age NULL, got %d", result.Count())
+	}
+
+	if result.Rows[0].String("email") != "charlie@mail.com" {
+		t.Fatalf("unexpected user returned")
+	}
+}
+
+func TestQueryInvalidFieldFails(t *testing.T) {
+	skipIfNoDocker(t)
+
+	eng, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	runMigration(t, eng, ctx)
+
+	_, err := eng.Query("User").
+		Filter("does_not_exist", "eq", 1).
+		Execute(ctx)
+
+	if err == nil {
+		t.Fatal("expected error for invalid field")
+	}
+}
+
+func TestQueryInvalidOperatorFails(t *testing.T) {
+	skipIfNoDocker(t)
+
+	eng, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	runMigration(t, eng, ctx)
+
+	_, err := eng.Query("User").
+		Filter("age", "approx", 30).
+		Execute(ctx)
+
+	if err == nil {
+		t.Fatal("expected error for invalid operator")
+	}
+}
+
+func TestQueryInvalidIncludeFails(t *testing.T) {
+	skipIfNoDocker(t)
+
+	eng, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	runMigration(t, eng, ctx)
+
+	_, err := eng.Query("User").
+		Include("payments").
+		Execute(ctx)
+
+	if err == nil {
+		t.Fatal("expected error for invalid include")
+	}
+}
+
 func TestQueryFetchAll(t *testing.T) {
 	skipIfNoDocker(t)
 
