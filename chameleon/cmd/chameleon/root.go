@@ -71,3 +71,13 @@ func getConfigFromEnv() engine.ConnectorConfig {
 	}
 	return config
 }
+
+/* func initEngine(schemaPath string) (*engine.Engine, error) {
+	eng, err := engine.NewEngineWithSchema(schemaPath)
+	if err != nil {
+		return nil, err
+	}
+
+	mutation.Register(eng)
+	return eng, nil
+} */

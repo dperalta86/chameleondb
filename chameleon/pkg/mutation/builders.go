@@ -57,9 +57,9 @@ func (ib *InsertBuilder) Build() (*engine.Mutation, error) {
 	ib.sql = ib.generateInsertSQL()
 
 	return &engine.Mutation{
-		Type:     engine.MutationInsert,
-		Entity:   ib.entity,
-		HasWhere: false,
+		Type:      engine.MutationInsert,
+		Entity:    ib.entity,
+		HasFilter: false,
 	}, nil
 }
 
@@ -188,9 +188,9 @@ func (ub *UpdateBuilder) Build() (*engine.Mutation, error) {
 	ub.sql = ub.generateUpdateSQL()
 
 	return &engine.Mutation{
-		Type:     engine.MutationUpdate,
-		Entity:   ub.entity,
-		HasWhere: len(ub.filters) > 0,
+		Type:      engine.MutationUpdate,
+		Entity:    ub.entity,
+		HasFilter: len(ub.filters) > 0,
 	}, nil
 }
 
@@ -277,9 +277,9 @@ func (db *DeleteBuilder) Build() (*engine.Mutation, error) {
 	db.sql = db.generateDeleteSQL()
 
 	return &engine.Mutation{
-		Type:     engine.MutationDelete,
-		Entity:   db.entity,
-		HasWhere: len(db.filters) > 0,
+		Type:      engine.MutationDelete,
+		Entity:    db.entity,
+		HasFilter: len(db.filters) > 0,
 	}, nil
 }
 
