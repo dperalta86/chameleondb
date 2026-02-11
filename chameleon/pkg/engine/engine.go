@@ -19,6 +19,9 @@ type Engine struct {
 
 	// Debug context
 	Debug *DebugContext
+
+	// Mutation factory (abstract, injected)
+	mutations MutationFactory
 }
 
 // NewEngine creates a new ChameleonDB engine
@@ -38,11 +41,16 @@ func (e *Engine) WithDebug(level DebugLevel) *Engine {
 	return e
 }
 
+//
+// ─────────────────────────────────────────────────────────────
+// Schema handling
+// ─────────────────────────────────────────────────────────────
+//
+
 // LoadSchemaFromString parses a schema from a string
 func (e *Engine) LoadSchemaFromString(input string) (*Schema, error) {
 	schemaJSON, err := ffi.ParseSchema(input)
 	if err != nil {
-		// Check if it's a structured parse error (JSON)
 		formattedErr := FormatError(err.Error())
 		return nil, fmt.Errorf("%s", formattedErr)
 	}
@@ -69,6 +77,12 @@ func (e *Engine) LoadSchemaFromFile(filepath string) (*Schema, error) {
 func (e *Engine) GetSchema() *Schema {
 	return e.schema
 }
+
+//
+// ─────────────────────────────────────────────────────────────
+// Connection handling
+// ─────────────────────────────────────────────────────────────
+//
 
 // Version returns the engine version
 func (e *Engine) Version() string {
@@ -105,6 +119,12 @@ func (e *Engine) Ping(ctx context.Context) error {
 	return e.connector.Ping(ctx)
 }
 
+//
+// ─────────────────────────────────────────────────────────────
+// Migrations
+// ─────────────────────────────────────────────────────────────
+//
+
 // GenerateMigration generates DDL SQL from the loaded schema
 func (e *Engine) GenerateMigration() (string, error) {
 	if e.schema == nil {
@@ -118,6 +138,47 @@ func (e *Engine) GenerateMigration() (string, error) {
 
 	return ffi.GenerateMigration(string(schemaJSON))
 }
+
+//
+// ─────────────────────────────────────────────────────────────
+// Mutation wiring (NO concrete dependencies)
+// ─────────────────────────────────────────────────────────────
+//
+
+// SetMutationFactory injects a mutation factory implementation
+func (e *Engine) SetMutationFactory(factory MutationFactory) {
+	e.mutations = factory
+}
+
+func (e *Engine) requireMutationFactory() {
+	if e.mutations == nil {
+		panic("mutation factory not configured")
+	}
+}
+
+// Insert starts a new INSERT mutation
+func (e *Engine) Insert(entity string) MutationBuilder {
+	e.requireMutationFactory()
+	return e.mutations.Insert(entity)
+}
+
+// Update starts a new UPDATE mutation
+func (e *Engine) Update(entity string) MutationBuilder {
+	e.requireMutationFactory()
+	return e.mutations.Update(entity)
+}
+
+// Delete starts a new DELETE mutation
+func (e *Engine) Delete(entity string) MutationBuilder {
+	e.requireMutationFactory()
+	return e.mutations.Delete(entity)
+}
+
+//
+// ─────────────────────────────────────────────────────────────
+// Schema helpers
+// ─────────────────────────────────────────────────────────────
+//
 
 // GetEntity returns an entity by name, or nil if not found
 func (s *Schema) GetEntity(name string) *Entity {

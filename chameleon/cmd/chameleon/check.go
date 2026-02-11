@@ -15,6 +15,10 @@ var (
 	outputJSON bool
 )
 
+// NOTE:
+// This command validates SCHEMA ONLY.
+// Mutation/runtime validations intentionally do NOT run here.
+// Do NOT import pkg/mutation in this command.
 var checkCmd = &cobra.Command{
 	Use:   "check [file]",
 	Short: "Check schema for errors (used by editor extensions)",
