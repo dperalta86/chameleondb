@@ -23,57 +23,27 @@ typedef enum ChameleonResult {
  * - `input` must be a valid null-terminated C string
  * - Caller must free the returned string with `chameleon_free_string`
  * - Returns NULL on error, check `error_out` for details
- *
- * # Example (from C/Go)
- * ```c
- * char* error = NULL;
- * char* json = chameleon_parse_schema("entity User { id: uuid primary, }", &error);
- * if (json) {
- *     printf("%s\n", json);
- *     chameleon_free_string(json);
- * } else {
- *     printf("Error: %s\n", error);
- *     chameleon_free_string(error);
- * }
- * ```
  */
 char *chameleon_parse_schema(const char *input, char **error_out);
 
 /**
  * Validate a schema (checks relations, constraints, etc.)
  * Returns JSON with structured errors
- *
- * # Safety
- * - `input` must be a valid null-terminated C string containing schema DSL
- * - Caller must free the returned string with `chameleon_free_string`
  */
 enum ChameleonResult chameleon_validate_schema(const char *input, char **error_out);
 
 /**
  * Free a string allocated by Rust
- *
- * # Safety
- * - `s` must be a pointer previously returned by a chameleon_* function
- * - Do not call this twice on the same pointer
- * - Passing NULL is safe (no-op)
  */
 void chameleon_free_string(char *s);
 
 /**
  * Get the version of the library
- *
- * # Safety
- * Returns a static string, do not free
  */
 const char *chameleon_version(void);
 
 /**
  * Generate SQL from a query JSON + schema JSON
- *
- * Input:  query_json  - serialized Query
- *         schema_json - serialized Schema
- * Output: returns JSON-serialized GeneratedSQL
- *         error_out   - error message on failure
  */
 enum ChameleonResult chameleon_generate_sql(const char *query_json,
                                             const char *schema_json,
@@ -81,11 +51,34 @@ enum ChameleonResult chameleon_generate_sql(const char *query_json,
 
 /**
  * Generate migration SQL from a schema JSON
- *
- * Input:  schema_json - serialized Schema
- * Output: returns the DDL SQL string directly
- *         error_out   - error message on failure
  */
 enum ChameleonResult chameleon_generate_migration(const char *schema_json, char **error_out);
+
+/**
+ * Set schema cache for efficient batch operations
+ *
+ * Call this once before batch mutations, then pass NULL for schema_json
+ * in generate_mutation_sql calls to reuse the cached schema
+ */
+const char *set_schema_cache(const char *schema_json);
+
+/**
+ * Clear the schema cache
+ * Call this after batch operations to free memory
+ */
+const char *clear_schema_cache(void);
+
+/**
+ * Generate SQL for a mutation operation
+ *
+ * # Arguments
+ * * `mutation_json` - Mutation spec: {"type":"insert|update|delete","entity":"Entity","fields":{...},"filters":{...}}
+ * * `schema_json` - Schema JSON (pass NULL to use cached schema from set_schema_cache)
+ *
+ * # Returns
+ * JSON: {"valid":true,"sql":"...","params":[...]} or {"valid":false,"error":"..."}
+ */
+const char *generate_mutation_sql(const char *mutation_json,
+                                  const char *schema_json);
 
 #endif  /* CHAMELEON_H */

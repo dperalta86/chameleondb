@@ -15,6 +15,7 @@ pub use typechecker::TypeCheckResult;
 pub use query::*;
 pub use sql::generate_sql;
 pub use migration::generate_migration;
+pub mod mutation;
 
 pub use ffi::{
     chameleon_parse_schema,

@@ -5,6 +5,13 @@ use std::ptr;
 use crate::parser::parse_schema;
 use crate::ast::Schema;
 use crate::ChameleonError;
+use std::sync::Mutex;
+use lazy_static::lazy_static;
+use serde_json::Value;
+
+lazy_static! {
+    static ref CACHED_SCHEMA: Mutex<Option<Schema>> = Mutex::new(None);
+}
 
 /// Result code for FFI functions
 #[repr(C)]
@@ -22,31 +29,16 @@ pub enum ChameleonResult {
 /// - `input` must be a valid null-terminated C string
 /// - Caller must free the returned string with `chameleon_free_string`
 /// - Returns NULL on error, check `error_out` for details
-/// 
-/// # Example (from C/Go)
-/// ```c
-/// char* error = NULL;
-/// char* json = chameleon_parse_schema("entity User { id: uuid primary, }", &error);
-/// if (json) {
-///     printf("%s\n", json);
-///     chameleon_free_string(json);
-/// } else {
-///     printf("Error: %s\n", error);
-///     chameleon_free_string(error);
-/// }
-/// ```
 #[no_mangle]
 pub unsafe extern "C" fn chameleon_parse_schema(
     input: *const c_char,
     error_out: *mut *mut c_char,
 ) -> *mut c_char {
-    // Validate input pointer
     if input.is_null() {
         set_error(error_out, "Input string is null");
         return ptr::null_mut();
     }
 
-    // Convert C string to Rust &str
     let input_str = match CStr::from_ptr(input).to_str() {
         Ok(s) => s,
         Err(e) => {
@@ -55,7 +47,6 @@ pub unsafe extern "C" fn chameleon_parse_schema(
         }
     };
 
-    // Parse schema
     let schema = match parse_schema(input_str) {
         Ok(s) => s,
         Err(e) => {
@@ -63,14 +54,11 @@ pub unsafe extern "C" fn chameleon_parse_schema(
                 .unwrap_or_else(|_| {
                     r#"{"kind":"InternalError","data":{"message":"Failed to serialize error"}}"#.to_string()
                 });
-
-        set_error(error_out, &json);
-        return ptr::null_mut();
-}
-
+            set_error(error_out, &json);
+            return ptr::null_mut();
+        }
     };
 
-    // Serialize to JSON
     let json = match serde_json::to_string_pretty(&schema) {
         Ok(j) => j,
         Err(e) => {
@@ -79,7 +67,6 @@ pub unsafe extern "C" fn chameleon_parse_schema(
         }
     };
 
-    // Convert to C string
     match CString::new(json) {
         Ok(c_str) => c_str.into_raw(),
         Err(e) => {
@@ -115,10 +102,6 @@ struct ValidationResultJson {
 
 /// Validate a schema (checks relations, constraints, etc.)
 /// Returns JSON with structured errors
-/// 
-/// # Safety
-/// - `input` must be a valid null-terminated C string containing schema DSL
-/// - Caller must free the returned string with `chameleon_free_string`
 #[no_mangle]
 pub unsafe extern "C" fn chameleon_validate_schema(
     input: *const c_char,
@@ -139,14 +122,11 @@ pub unsafe extern "C" fn chameleon_validate_schema(
 
     let mut validation_errors: Vec<ValidationErrorJson> = Vec::new();
 
-    // Parse schema
     match crate::parser::parse_schema(c_str) {
         Ok(schema) => {
-            // Type check the schema
             let result = crate::typechecker::type_check(&schema);
             
             if result.errors.is_empty() {
-                // Success - return valid JSON
                 let result_json = ValidationResultJson {
                     valid: true,
                     errors: vec![],
@@ -166,7 +146,6 @@ pub unsafe extern "C" fn chameleon_validate_schema(
                     }
                 }
             } else {
-                // Validation errors - build structured response
                 for err in result.errors {
                     validation_errors.push(ValidationErrorJson {
                         kind: "ValidationError".to_string(),
@@ -199,7 +178,6 @@ pub unsafe extern "C" fn chameleon_validate_schema(
             }
         }
         Err(e) => {
-            // Parse error - extract details if available
             match &e {
                 ChameleonError::ParseError(detail) => {
                     validation_errors.push(ValidationErrorJson {
@@ -246,11 +224,6 @@ pub unsafe extern "C" fn chameleon_validate_schema(
 }
 
 /// Free a string allocated by Rust
-/// 
-/// # Safety
-/// - `s` must be a pointer previously returned by a chameleon_* function
-/// - Do not call this twice on the same pointer
-/// - Passing NULL is safe (no-op)
 #[no_mangle]
 pub unsafe extern "C" fn chameleon_free_string(s: *mut c_char) {
     if !s.is_null() {
@@ -259,30 +232,13 @@ pub unsafe extern "C" fn chameleon_free_string(s: *mut c_char) {
 }
 
 /// Get the version of the library
-/// 
-/// # Safety
-/// Returns a static string, do not free
 #[no_mangle]
 pub extern "C" fn chameleon_version() -> *const c_char {
     static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
     VERSION.as_ptr() as *const c_char
 }
 
-// Helper function to set error message
-unsafe fn set_error(error_out: *mut *mut c_char, message: &str) {
-    if !error_out.is_null() {
-        if let Ok(c_str) = CString::new(message) {
-            *error_out = c_str.into_raw();
-        }
-    }
-}
-
 /// Generate SQL from a query JSON + schema JSON
-/// 
-/// Input:  query_json  - serialized Query
-///         schema_json - serialized Schema  
-/// Output: returns JSON-serialized GeneratedSQL
-///         error_out   - error message on failure
 #[no_mangle]
 pub unsafe extern "C" fn chameleon_generate_sql(
     query_json: *const c_char,
@@ -331,22 +287,17 @@ pub unsafe extern "C" fn chameleon_generate_sql(
             let json = serde_json::to_string(&generated).unwrap();
             let c_str = CString::new(json).unwrap();
             let ptr = c_str.into_raw();
-            // We need to return the pointer, reuse error_out as output channel
             *error_out = ptr;
             ChameleonResult::Ok
         }
         Err(e) => {
             set_error(error_out, &format!("SQL generation error: {}", e));
-            return ChameleonResult::ValidationError;
+            ChameleonResult::ValidationError
         }
     }
 }
 
 /// Generate migration SQL from a schema JSON
-///
-/// Input:  schema_json - serialized Schema
-/// Output: returns the DDL SQL string directly
-///         error_out   - error message on failure
 #[no_mangle]
 pub unsafe extern "C" fn chameleon_generate_migration(
     schema_json: *const c_char,
@@ -373,7 +324,7 @@ pub unsafe extern "C" fn chameleon_generate_migration(
         }
     };
 
-    match crate::migration::generate_migration(&schema) {
+    match crate::migration::generator::generate_migration(&schema) {
         Ok(migration) => {
             let c_str = CString::new(migration.sql).unwrap();
             let ptr = c_str.into_raw();
@@ -386,6 +337,137 @@ pub unsafe extern "C" fn chameleon_generate_migration(
         }
     }
 }
+
+// ============================================================
+// NEW: MUTATION SQL GENERATION (v0.1)
+// ============================================================
+
+/// Set schema cache for efficient batch operations
+/// 
+/// Call this once before batch mutations, then pass NULL for schema_json
+/// in generate_mutation_sql calls to reuse the cached schema
+#[no_mangle]
+pub extern "C" fn set_schema_cache(schema_json: *const c_char) -> *const c_char {
+    let schema_str = unsafe {
+        CStr::from_ptr(schema_json)
+            .to_str()
+            .unwrap_or("")
+            .to_string()
+    };
+
+    let schema: Schema = match serde_json::from_str(&schema_str) {
+        Ok(s) => s,
+        Err(e) => {
+            let error_json = serde_json::json!({
+                "valid": false,
+                "error": format!("Failed to parse schema: {}", e)
+            });
+            return CString::new(error_json.to_string()).unwrap().into_raw();
+        }
+    };
+
+    let mut cache = CACHED_SCHEMA.lock().unwrap();
+    *cache = Some(schema);
+
+    let result = serde_json::json!({"valid": true});
+    CString::new(result.to_string()).unwrap().into_raw()
+}
+
+/// Clear the schema cache
+/// Call this after batch operations to free memory
+#[no_mangle]
+pub extern "C" fn clear_schema_cache() -> *const c_char {
+    let mut cache = CACHED_SCHEMA.lock().unwrap();
+    *cache = None;
+
+    let result = serde_json::json!({"valid": true});
+    CString::new(result.to_string()).unwrap().into_raw()
+}
+
+/// Generate SQL for a mutation operation
+/// 
+/// # Arguments
+/// * `mutation_json` - Mutation spec: {"type":"insert|update|delete","entity":"Entity","fields":{...},"filters":{...}}
+/// * `schema_json` - Schema JSON (pass NULL to use cached schema from set_schema_cache)
+/// 
+/// # Returns
+/// JSON: {"valid":true,"sql":"...","params":[...]} or {"valid":false,"error":"..."}
+#[no_mangle]
+pub extern "C" fn generate_mutation_sql(
+    mutation_json: *const c_char,
+    schema_json: *const c_char,
+) -> *const c_char {
+    let mutation_str = unsafe {
+        CStr::from_ptr(mutation_json)
+            .to_str()
+            .unwrap_or("")
+            .to_string()
+    };
+
+    let mutation_value: Value = match serde_json::from_str(&mutation_str) {
+        Ok(v) => v,
+        Err(e) => {
+            let error_json = serde_json::json!({
+                "valid": false,
+                "error": format!("Invalid mutation JSON: {}", e)
+            });
+            return CString::new(error_json.to_string()).unwrap().into_raw();
+        }
+    };
+
+    let schema = if schema_json.is_null() {
+        let cache = CACHED_SCHEMA.lock().unwrap();
+        match cache.clone() {
+            Some(s) => s,
+            None => {
+                let error_json = serde_json::json!({
+                    "valid": false,
+                    "error": "No schema provided and cache is empty. Call set_schema_cache() first or pass schema_json."
+                });
+                return CString::new(error_json.to_string()).unwrap().into_raw();
+            }
+        }
+    } else {
+        let schema_str = unsafe {
+            CStr::from_ptr(schema_json)
+                .to_str()
+                .unwrap_or("")
+                .to_string()
+        };
+
+        let schema: Schema = match serde_json::from_str(&schema_str) {
+            Ok(s) => s,
+            Err(e) => {
+                let error_json = serde_json::json!({
+                    "valid": false,
+                    "error": format!("Invalid schema JSON: {}", e)
+                });
+                return CString::new(error_json.to_string()).unwrap().into_raw();
+            }
+        };
+
+        let mut cache = CACHED_SCHEMA.lock().unwrap();
+        *cache = Some(schema.clone());
+
+        schema
+    };
+
+    let result = crate::mutation::generate_mutation_sql(&mutation_value, &schema);
+    CString::new(result.to_string()).unwrap().into_raw()
+}
+
+// ============================================================
+// HELPER FUNCTION
+// ============================================================
+
+unsafe fn set_error(error_out: *mut *mut c_char, message: &str) {
+    if !error_out.is_null() {
+        if let Ok(c_str) = CString::new(message) {
+            *error_out = c_str.into_raw();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,12 +493,10 @@ mod tests {
             assert!(!result.is_null(), "Parse should succeed");
             assert!(error.is_null(), "No error should be set");
 
-            // Verify JSON output
             let json_str = CStr::from_ptr(result).to_str().unwrap();
             assert!(json_str.contains("User"));
             assert!(json_str.contains("email"));
 
-            // Cleanup
             chameleon_free_string(result);
         }
     }
@@ -433,17 +513,14 @@ mod tests {
             assert!(!error.is_null(), "Error should be set");
 
             let error_msg = CStr::from_ptr(error).to_str().unwrap();
-            // Now it returns JSON with the error details
             assert!(error_msg.contains("kind") || error_msg.contains("message"));
 
-            // Cleanup
             chameleon_free_string(error);
         }
     }
 
     #[test]
     fn test_validate_schema_success() {
-        // Valid schema with Vec<Entity> structure
         let input = CString::new(
             r#"
             entity User {
@@ -461,7 +538,6 @@ mod tests {
 
             assert_eq!(result, ChameleonResult::Ok, "Validation should succeed");
             
-            // error_out contains the JSON response
             if !error.is_null() {
                 let json_str = CStr::from_ptr(error).to_str().unwrap();
                 assert!(json_str.contains("\"valid\":true"));
@@ -472,7 +548,6 @@ mod tests {
 
     #[test]
     fn test_validate_schema_with_duplicates() {
-        // Invalid schema with duplicate entities
         let input = CString::new(
             r#"
             entity User {
@@ -516,7 +591,6 @@ mod tests {
     fn test_free_null_is_safe() {
         unsafe {
             chameleon_free_string(ptr::null_mut());
-            // Should not crash
         }
     }
 }

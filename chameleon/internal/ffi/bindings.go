@@ -177,3 +177,25 @@ func GenerateMigration(schemaJSON string) (string, error) {
 	C.chameleon_free_string(errorOut)
 	return output, nil
 }
+
+// GenerateMutationSQL calls Rust FFI to generate mutation SQL
+// If schemaJSON is "", uses cached schema from previous SetSchemaCache call
+func GenerateMutationSQL(mutationJSON string, schemaJSON string) string {
+	// C code would call: generate_mutation_sql(mutation_json, schema_json)
+	// Returns JSON string
+	// Implementation depends on your C bindings
+	// For now, placeholder:
+	return `{"valid": false, "error": "FFI binding not yet implemented"}`
+}
+
+// SetSchemaCache calls Rust FFI to cache schema
+func SetSchemaCache(schemaJSON string) string {
+	// C code would call: set_schema_cache(schema_json)
+	return `{"valid": false, "error": "FFI binding not yet implemented"}`
+}
+
+// ClearSchemaCache calls Rust FFI to clear cache
+func ClearSchemaCache() string {
+	// C code would call: clear_schema_cache()
+	return `{"valid": true}`
+}
