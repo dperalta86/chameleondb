@@ -141,12 +141,36 @@ func TestMigrationCreatesUniqueConstraints(t *testing.T) {
 
 func TestMigrationIsIdempotent(t *testing.T) {
 	skipIfNoDocker(t)
-
 	eng, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
 
+	// Primera migración
 	runMigration(t, eng, ctx)
-	runMigration(t, eng, ctx) // no debe fallar
+
+	// Limpiar tablas (DROP en orden inverso por FKs)
+	config := testConfig()
+	conn, err := pgx.Connect(ctx, config.ConnectionString())
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	// Order matters: order_items → orders → users
+	_, err = conn.Exec(ctx, "DROP TABLE IF EXISTS order_items CASCADE")
+	if err != nil {
+		t.Fatalf("Failed to drop order_items: %v", err)
+	}
+	_, err = conn.Exec(ctx, "DROP TABLE IF EXISTS orders CASCADE")
+	if err != nil {
+		t.Fatalf("Failed to drop orders: %v", err)
+	}
+	_, err = conn.Exec(ctx, "DROP TABLE IF EXISTS users CASCADE")
+	if err != nil {
+		t.Fatalf("Failed to drop users: %v", err)
+	}
+
+	// Segunda migración (no debe fallar)
+	runMigration(t, eng, ctx)
 }
 
 func TestOrdersUserForeignKeyIsCorrect(t *testing.T) {

@@ -183,14 +183,450 @@ fn error_response(message: &str) -> Value {
     })
 }
 
+// === Tests ===
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{Entity, Field, FieldType};
+
+    fn test_schema() -> Schema {
+        let mut schema = Schema::new();
+
+        let mut user = Entity::new("User".to_string());
+        user.add_field(Field {
+            name: "id".to_string(),
+            field_type: FieldType::UUID,
+            nullable: false,
+            unique: false,
+            primary_key: true,
+            default: None,
+            backend: None,
+        });
+        user.add_field(Field {
+            name: "email".to_string(),
+            field_type: FieldType::String,
+            nullable: false,
+            unique: true,
+            primary_key: false,
+            default: None,
+            backend: None,
+        });
+        user.add_field(Field {
+            name: "name".to_string(),
+            field_type: FieldType::String,
+            nullable: false,
+            unique: false,
+            primary_key: false,
+            default: None,
+            backend: None,
+        });
+        user.add_field(Field {
+            name: "age".to_string(),
+            field_type: FieldType::Int,
+            nullable: true,
+            unique: false,
+            primary_key: false,
+            default: None,
+            backend: None,
+        });
+        schema.add_entity(user);
+
+        schema
+    }
+
+    // ============================================================
+    // HELPER TESTS
+    // ============================================================
 
     #[test]
     fn test_entity_to_table() {
         assert_eq!(entity_to_table("User"), "user");
         assert_eq!(entity_to_table("UserProfile"), "user_profile");
         assert_eq!(entity_to_table("OrderItem"), "order_item");
+        assert_eq!(entity_to_table("HTTPServer"), "h_t_t_p_server");
+    }
+
+    // ============================================================
+    // INSERT TESTS
+    // ============================================================
+
+#[test]
+fn test_insert_single_field() {
+    let schema = test_schema();
+    let mutation = serde_json::json!({
+        "type": "insert",
+        "entity": "User",
+        "fields": {
+            "email": "ana@mail.com"
+        }
+    });
+
+    let result = generate_mutation_sql(&mutation, &schema);
+
+    println!("DEBUG: Full result = {}", serde_json::to_string_pretty(&result).unwrap());
+    println!("DEBUG: SQL value = {:?}", result["sql"]);
+
+    assert_eq!(result["valid"], true);
+    assert!(result["sql"].as_str().unwrap().contains("INSERT INTO user"));
+    assert!(result["sql"].as_str().unwrap().contains("email"));
+    assert_eq!(result["params"][0], "email");
+}
+
+    #[test]
+    fn test_insert_multiple_fields() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "insert",
+            "entity": "User",
+            "fields": {
+                "email": "ana@mail.com",
+                "name": "Ana García",
+                "age": 28
+            }
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], true);
+        let sql = result["sql"].as_str().unwrap();
+        assert!(sql.contains("INSERT INTO user"));
+        assert!(sql.contains("RETURNING *"));
+        assert_eq!(result["params"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_insert_missing_entity() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "insert",
+            "entity": "NonExistent",
+            "fields": {"field": "value"}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], false);
+        assert!(result["error"].as_str().unwrap().contains("not found"));
+    }
+
+    #[test]
+    fn test_insert_unknown_field() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "insert",
+            "entity": "User",
+            "fields": {
+                "email": "ana@mail.com",
+                "unknown_field": "value"
+            }
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], false);
+        assert!(result["error"].as_str().unwrap().contains("Unknown field"));
+    }
+
+    #[test]
+    fn test_insert_missing_fields() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "insert",
+            "entity": "User",
+            "fields": {}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], true); // SQL generated, DB will enforce NOT NULL
+        let sql = result["sql"].as_str().unwrap();
+        assert!(sql.contains("INSERT INTO user"));
+    }
+
+    // ============================================================
+    // UPDATE TESTS
+    // ============================================================
+
+    #[test]
+    fn test_update_with_filter() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "update",
+            "entity": "User",
+            "filters": {"id": "uuid-123"},
+            "fields": {"name": "Ana María"}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], true);
+        let sql = result["sql"].as_str().unwrap();
+        assert!(sql.contains("UPDATE user"));
+        assert!(sql.contains("SET"));
+        assert!(sql.contains("WHERE"));
+        assert!(sql.contains("RETURNING *"));
+    }
+
+    #[test]
+    fn test_update_multiple_fields_single_filter() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "update",
+            "entity": "User",
+            "filters": {"id": "uuid-123"},
+            "fields": {
+                "name": "Ana",
+                "age": 30
+            }
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], true);
+        assert_eq!(result["params"].as_array().unwrap().len(), 3); // 2 SET + 1 WHERE
+    }
+
+    #[test]
+    fn test_update_multiple_filters() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "update",
+            "entity": "User",
+            "filters": {
+                "id": "uuid-123",
+                "email": "old@mail.com"
+            },
+            "fields": {"name": "Ana"}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], true);
+        let sql = result["sql"].as_str().unwrap();
+        assert!(sql.contains("WHERE"));
+        assert!(sql.contains("AND"));
+    }
+
+    #[test]
+    fn test_update_without_filter() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "update",
+            "entity": "User",
+            "filters": {},
+            "fields": {"name": "Ana"}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], false);
+        assert!(result["error"].as_str().unwrap().contains("at least one filter"));
+    }
+
+    #[test]
+    fn test_update_primary_key() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "update",
+            "entity": "User",
+            "filters": {"id": "uuid-123"},
+            "fields": {"id": "new-uuid"}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], false);
+        assert!(result["error"].as_str().unwrap().contains("primary key"));
+    }
+
+    #[test]
+    fn test_update_unknown_field() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "update",
+            "entity": "User",
+            "filters": {"id": "uuid-123"},
+            "fields": {"unknown": "value"}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], false);
+        assert!(result["error"].as_str().unwrap().contains("Unknown field"));
+    }
+
+    // ============================================================
+    // DELETE TESTS
+    // ============================================================
+
+    #[test]
+    fn test_delete_with_filter() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "delete",
+            "entity": "User",
+            "filters": {"id": "uuid-123"}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], true);
+        let sql = result["sql"].as_str().unwrap();
+        assert!(sql.contains("DELETE FROM user"));
+        assert!(sql.contains("WHERE"));
+    }
+
+    #[test]
+    fn test_delete_multiple_filters() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "delete",
+            "entity": "User",
+            "filters": {
+                "id": "uuid-123",
+                "email": "ana@mail.com"
+            }
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], true);
+        let sql = result["sql"].as_str().unwrap();
+        assert!(sql.contains("AND"));
+    }
+
+    #[test]
+    fn test_delete_without_filter() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "delete",
+            "entity": "User",
+            "filters": {}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], false);
+        assert!(result["error"].as_str().unwrap().contains("at least one filter"));
+    }
+
+    #[test]
+    fn test_delete_safety_guard() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "delete",
+            "entity": "User"
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], false);
+        assert!(result["error"].as_str().unwrap().contains("filter"));
+    }
+
+    // ============================================================
+    // ERROR HANDLING TESTS
+    // ============================================================
+
+    #[test]
+    fn test_missing_mutation_type() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "entity": "User",
+            "fields": {}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], false);
+        assert!(result["error"].as_str().unwrap().contains("type"));
+    }
+
+    #[test]
+    fn test_unknown_mutation_type() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "upsert",
+            "entity": "User",
+            "fields": {}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], false);
+        assert!(result["error"].as_str().unwrap().contains("Unknown mutation type"));
+    }
+
+    #[test]
+    fn test_missing_entity() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "insert",
+            "fields": {}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        assert_eq!(result["valid"], false);
+        assert!(result["error"].as_str().unwrap().contains("entity"));
+    }
+
+    // ============================================================
+    // SQL GENERATION TESTS
+    // ============================================================
+
+    #[test]
+    fn test_insert_sql_format() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "insert",
+            "entity": "User",
+            "fields": {"email": "test@mail.com", "name": "Test"}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        let sql = result["sql"].as_str().unwrap();
+        // Should use parameterized queries
+        assert!(sql.contains("$1") || sql.contains("$2"));
+        // Should quote field names
+        assert!(sql.contains("\"email\"") || sql.contains("\"name\""));
+    }
+
+    #[test]
+    fn test_update_sql_format() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "update",
+            "entity": "User",
+            "filters": {"id": "uuid"},
+            "fields": {"name": "Test"}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        let sql = result["sql"].as_str().unwrap();
+        assert!(sql.contains("UPDATE"));
+        assert!(sql.contains("SET"));
+        assert!(sql.contains("WHERE"));
+        assert!(sql.contains("$"));
+    }
+
+    #[test]
+    fn test_delete_sql_format() {
+        let schema = test_schema();
+        let mutation = serde_json::json!({
+            "type": "delete",
+            "entity": "User",
+            "filters": {"id": "uuid"}
+        });
+
+        let result = generate_mutation_sql(&mutation, &schema);
+
+        let sql = result["sql"].as_str().unwrap();
+        assert!(sql.contains("DELETE FROM"));
+        assert!(sql.contains("WHERE"));
+        assert!(sql.contains("$"));
     }
 }

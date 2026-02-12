@@ -3,6 +3,7 @@ package mutation
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/chameleon-db/chameleondb/chameleon/pkg/engine"
 )
@@ -194,10 +195,7 @@ func (ub *UpdateBuilder) Build() (*engine.Mutation, error) {
 	}, nil
 }
 
-func (ub *UpdateBuilder) generateUpdateSQL() string {
-	panic("unimplemented")
-}
-
+// Exec executes the validated mutation
 func (ub *UpdateBuilder) Exec() error {
 	if ub.sql == "" {
 		if _, err := ub.Build(); err != nil {
@@ -213,8 +211,34 @@ func (ub *UpdateBuilder) Exec() error {
 		return nil
 	}
 
-	// TODO: ejecutar
+	// TODO: ejecutar vía executor / FFI
 	return nil
+}
+
+func (ub *UpdateBuilder) generateUpdateSQL() string {
+	var setClauses []string
+	i := 1
+
+	for field := range ub.updates {
+		setClauses = append(setClauses, fmt.Sprintf(`"%s"=$%d`, field, i))
+		i++
+	}
+
+	var filterClauses []string
+	for field := range ub.filters {
+		fieldName := strings.Split(field, ":")[0]
+		filterClauses = append(filterClauses, fmt.Sprintf(`"%s"=$%d`, fieldName, i))
+		i++
+	}
+
+	table := strings.ToLower(ub.entity)
+
+	return fmt.Sprintf(
+		`UPDATE "%s" SET %s WHERE %s RETURNING *`,
+		table,
+		strings.Join(setClauses, ", "),
+		strings.Join(filterClauses, " AND "),
+	)
 }
 
 //
@@ -283,10 +307,7 @@ func (db *DeleteBuilder) Build() (*engine.Mutation, error) {
 	}, nil
 }
 
-func (db *DeleteBuilder) generateDeleteSQL() string {
-	panic("unimplemented")
-}
-
+// Exec executes the validated mutation
 func (db *DeleteBuilder) Exec() error {
 	if db.sql == "" {
 		if _, err := db.Build(); err != nil {
@@ -302,8 +323,27 @@ func (db *DeleteBuilder) Exec() error {
 		return nil
 	}
 
-	// TODO: ejecutar
+	// TODO: ejecutar vía executor / FFI
 	return nil
+}
+
+func (db *DeleteBuilder) generateDeleteSQL() string {
+	var filterClauses []string
+	i := 1
+
+	for field := range db.filters {
+		fieldName := strings.Split(field, ":")[0]
+		filterClauses = append(filterClauses, fmt.Sprintf(`"%s"=$%d`, fieldName, i))
+		i++
+	}
+
+	table := strings.ToLower(db.entity)
+
+	return fmt.Sprintf(
+		`DELETE FROM "%s" WHERE %s`,
+		table,
+		strings.Join(filterClauses, " AND "),
+	)
 }
 
 //
