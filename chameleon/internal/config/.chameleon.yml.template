@@ -1,0 +1,58 @@
+# ChameleonDB Configuration
+# Generated at {{.CreatedAt}}
+
+version: "0.1.4"
+created_at: {{.CreatedAt}}
+
+# Database connection settings
+database:
+  driver: "postgresql"
+  # Use environment variable (recommended)
+  connection_string: ${DATABASE_URL}
+  # OR hardcode (not recommended for production)
+  # connection_string: "postgresql://localhost:5432/myapp_dev"
+  
+  # Connection pool settings
+  max_connections: 10
+  connection_timeout: 30  # seconds
+  migration_timeout: 300  # seconds
+
+# Schema management
+schema:
+  # Paths to schema directories (relative or absolute)
+  paths:
+    - "./schemas"
+  
+  # Where to save merged schema (for reference/debugging)
+  merged_output: ".chameleon/state/schema.merged.json"
+  
+  # Fail on validation warnings
+  validation_strict: false
+
+# Feature flags
+features:
+  # Auto-apply pending migrations
+  auto_migration: true
+  
+  # Allow rollbacks
+  rollback_enabled: true
+  
+  # Enable audit logging (journal)
+  audit_logging: true
+  
+  # Create backup before each migration
+  backup_on_migrate: true
+  
+  # Default to --dry-run mode
+  dry_run_default: false
+
+# Safety settings
+safety:
+  # Require confirmation before applying migrations
+  require_confirmation: false
+  
+  # Always create backup before applying
+  backup_before_apply: true
+  
+  # Validate schema before applying
+  validate_schema: true
