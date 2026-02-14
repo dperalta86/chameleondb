@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -185,19 +186,39 @@ func (l *Logger) updateIndex(e *Entry) error {
 	if index["date"] != today {
 		index["date"] = today
 		index["entries"] = 0
-		index["by_action"] = make(map[string]int)
+		index["by_action"] = make(map[string]interface{})
 	}
 
-	// Increment counters
-	entries := index["entries"].(float64)
+	// Increment counters - handle float64 from JSON
+	var entries int
+	if val, exists := index["entries"]; exists {
+		if floatVal, ok := val.(float64); ok {
+			entries = int(floatVal)
+		} else if intVal, ok := val.(int); ok {
+			entries = intVal
+		}
+	}
 	index["entries"] = entries + 1
 
-	byAction := index["by_action"].(map[string]interface{})
+	// Update by_action map
+	byAction, ok := index["by_action"].(map[string]interface{})
+	if !ok {
+		byAction = make(map[string]interface{})
+		index["by_action"] = byAction
+	}
+
 	count := byAction[e.Action]
 	if count == nil {
 		byAction[e.Action] = 1
 	} else {
-		byAction[e.Action] = int(count.(float64)) + 1
+		// Handle both int and float64 from JSON
+		var countVal int
+		if floatVal, ok := count.(float64); ok {
+			countVal = int(floatVal)
+		} else if intVal, ok := count.(int); ok {
+			countVal = intVal
+		}
+		byAction[e.Action] = countVal + 1
 	}
 
 	// Save index
@@ -209,7 +230,7 @@ func (l *Logger) updateIndex(e *Entry) error {
 	return os.WriteFile(indexFile, data, 0644)
 }
 
-// Last returns the last N entries
+// Last returns the last N entries from today's log
 func (l *Logger) Last(n int) ([]*Entry, error) {
 	logFile := l.getLogFile()
 
@@ -221,20 +242,119 @@ func (l *Logger) Last(n int) ([]*Entry, error) {
 		return nil, err
 	}
 
-	lines := string(data) // Convert bytes to string
-	// TODO: Parse and return entries
-	_ = lines // Avoid unused warning
-	return []*Entry{}, nil
+	// Parse lines
+	lines := strings.Split(string(data), "\n")
+
+	var entries []*Entry
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		entry, err := l.parseEntry(line)
+		if err != nil {
+			// Skip unparseable lines
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	// Return last N
+	if len(entries) > n {
+		entries = entries[len(entries)-n:]
+	}
+
+	return entries, nil
 }
 
 // Errors returns all error entries from today
 func (l *Logger) Errors() ([]*Entry, error) {
-	// TODO: Implement
-	return []*Entry{}, nil
+	logFile := l.getLogFile()
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []*Entry{}, nil
+		}
+		return nil, err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var entries []*Entry
+
+	for _, line := range lines {
+		if line == "" || !strings.Contains(line, "status=error") {
+			continue
+		}
+		entry, err := l.parseEntry(line)
+		if err != nil {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
 }
 
 // Migrations returns all migration entries
 func (l *Logger) Migrations() ([]*Entry, error) {
-	// TODO: Implement
-	return []*Entry{}, nil
+	logFile := l.getLogFile()
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []*Entry{}, nil
+		}
+		return nil, err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var entries []*Entry
+
+	for _, line := range lines {
+		if line == "" || !strings.Contains(line, "[migrate]") {
+			continue
+		}
+		entry, err := l.parseEntry(line)
+		if err != nil {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
+}
+
+// parseEntry parses a log line into an Entry
+// Format: 2026-02-12T10:15:00Z [ACTION] status=ok key1=val1 key2=val2
+func (l *Logger) parseEntry(line string) (*Entry, error) {
+	parts := strings.Fields(line)
+	if len(parts) < 3 {
+		return nil, fmt.Errorf("invalid log line format")
+	}
+
+	timestamp, err := time.Parse(time.RFC3339, parts[0])
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract action from [ACTION]
+	actionStr := parts[1]
+	action := strings.Trim(actionStr, "[]")
+
+	entry := &Entry{
+		Timestamp: timestamp,
+		Action:    action,
+	}
+
+	// Parse remaining fields
+	for _, part := range parts[2:] {
+		if strings.HasPrefix(part, "status=") {
+			entry.Status = strings.TrimPrefix(part, "status=")
+		} else if strings.HasPrefix(part, "error=") {
+			errVal := strings.TrimPrefix(part, "error=")
+			entry.Error = strings.Trim(errVal, "\"")
+		}
+	}
+
+	return entry, nil
 }

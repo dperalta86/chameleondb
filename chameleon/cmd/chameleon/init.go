@@ -155,7 +155,6 @@ entity User {
     id: uuid primary,
     email: string unique,
     name: string,
-    age: int?,
     created_at: timestamp default now(),
 }
 

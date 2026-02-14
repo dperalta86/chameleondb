@@ -33,6 +33,7 @@ func (d *Directory) Initialize() error {
 	subdirs := []string{
 		"state",
 		"state/migrations",
+		"state/debug",
 		"journal",
 		"backups",
 	}

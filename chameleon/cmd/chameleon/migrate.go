@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/chameleon-db/chameleondb/chameleon/internal/admin"
+	"github.com/chameleon-db/chameleondb/chameleon/internal/schema"
 	"github.com/chameleon-db/chameleondb/chameleon/internal/state"
 	"github.com/chameleon-db/chameleondb/chameleon/pkg/engine"
 	"github.com/jackc/pgx/v5"
@@ -81,32 +85,64 @@ Examples:
 		printInfo("Loading schemas from: %v", cfg.Schema.Paths)
 		eng := engine.NewEngine()
 
-		var mergedSchemaPath string
-		if len(cfg.Schema.Paths) > 0 {
-			// For now, load first schema (v0.2: merge multiple)
-			schemaPath := cfg.Schema.Paths[0]
-
-			// Find .cham files
-			chamFiles, err := findSchemaFiles(schemaPath)
-			if err != nil {
-				journalLogger.LogError("migrate", err, map[string]interface{}{"action": "load_schema"})
-				return fmt.Errorf("failed to find schema files: %w", err)
-			}
-
-			if len(chamFiles) == 0 {
-				return fmt.Errorf("no schema files found in %s", schemaPath)
-			}
-
-			// Load first schema (v0.2: merge all)
-			_, err = eng.LoadSchemaFromFile(chamFiles[0])
-			if err != nil {
-				journalLogger.LogError("migrate", err, map[string]interface{}{"action": "load_schema"})
-				return fmt.Errorf("failed to load schema: %w", err)
-			}
-
-			printSuccess("Schema loaded and validated (%d files)", len(chamFiles))
-			mergedSchemaPath = filepath.Join(filepath.Dir(chamFiles[0]), "schema.merged.cham")
+		// Load all schema files using FileLoader
+		loader := schema.NewFileLoader(cfg.Schema.Paths)
+		filenames, schemaContents, err := loader.LoadAll()
+		if err != nil {
+			journalLogger.LogError("migrate", err, map[string]interface{}{"action": "load_schemas"})
+			return fmt.Errorf("failed to load schemas: %w", err)
 		}
+
+		printSuccess("Found %d schema file(s): %v", len(filenames), filenames)
+
+		// Merge schemas using SimpleMerger with source tracking
+		merger := schema.NewSimpleMerger()
+		mergedResult, err := merger.Merge(filenames, schemaContents)
+		if err != nil {
+			journalLogger.LogError("migrate", err, map[string]interface{}{"action": "merge_schemas"})
+			return fmt.Errorf("failed to merge schemas: %w", err)
+		}
+
+		mergedSchema := mergedResult.Content
+		lineMap := mergedResult.LineMap
+
+		// Validate merged schema
+		if err := merger.Validate(mergedSchema); err != nil {
+			journalLogger.LogError("migrate", err, map[string]interface{}{"action": "validate_schemas"})
+			return fmt.Errorf("schema validation failed: %w", err)
+		}
+
+		// Parse merged schema (capture errors with source mapping)
+		_, err = eng.LoadSchemaFromString(mergedSchema)
+		if err != nil {
+			// Try to map error line to source file
+			errMsg := err.Error()
+			sourceInfo := tryMapErrorToSource(errMsg, lineMap)
+			if sourceInfo != "" {
+				errMsg = strings.ReplaceAll(errMsg, "schema.cham", sourceInfo)
+				errMsg = sourceInfo + "\n" + errMsg
+			}
+
+			journalLogger.LogError("migrate", fmt.Errorf("%s", errMsg), map[string]interface{}{
+				"action": "parse_schema",
+				"files":  filenames,
+			})
+
+			// Save merged schema for debugging with timestamp
+			if len(cfg.Schema.Paths) > 0 {
+				debugDir := filepath.Join(filepath.Dir(cfg.Schema.Paths[0]), ".chameleon", "state", "debug")
+				os.MkdirAll(debugDir, 0755)
+				timestamp := time.Now().Format("20060102-150405")
+				debugPath := filepath.Join(debugDir, fmt.Sprintf("schema.merged.%s.cham", timestamp))
+				os.WriteFile(debugPath, []byte(mergedSchema), 0644)
+				printError("Schema saved to %s for debugging", debugPath)
+			}
+
+			return fmt.Errorf("failed to parse merged schemas:\n%s", errMsg)
+		}
+
+		printSuccess("Schema loaded and validated")
+		mergedSchemaPath := filepath.Join(filepath.Dir(cfg.Schema.Paths[0]), "schema.merged.cham")
 
 		// Get current state
 		currentState, err := stateTracker.LoadCurrent()
@@ -256,29 +292,44 @@ func init() {
 	rootCmd.AddCommand(migrateCmd)
 }
 
-// findSchemaFiles finds all .cham files in a directory
-func findSchemaFiles(dirPath string) ([]string, error) {
-	var files []string
+// tryMapErrorToSource intenta extraer el número de línea del error
+// y mapearlo a archivo origen usando lineMap
+// Mejorada - más robusta
+func tryMapErrorToSource(errMsg string, lineMap map[int]schema.SourceLine) string {
+	// Buscar patrón: "line 25" o "25:" o "line 25 column"
+	patterns := []string{
+		`line (\d+)`,    // "line 50"
+		`-->.*?:(\d+):`, // "--> file:50:5"
+		`\s(\d+)\s*│`,   // " 50 │" (formato con línea visual)
+	}
 
-	// Check if path is absolute or relative
-	if !filepath.IsAbs(dirPath) {
-		workDir, err := os.Getwd()
-		if err != nil {
-			return nil, err
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(errMsg)
+		if matches != nil && len(matches) > 1 {
+			lineNum, _ := strconv.Atoi(matches[1])
+
+			fmt.Fprintf(os.Stderr, "[DEBUG] Found line %d in error, searching lineMap (size: %d)\n", lineNum, len(lineMap))
+
+			// Buscar en lineMap (buscar en rango porque puede haber offset)
+			if source, exists := lineMap[lineNum]; exists {
+				fmt.Fprintf(os.Stderr, "[DEBUG] Found in lineMap: %s:%d\n", source.File, source.LineNumber)
+				return fmt.Sprintf("Error in %s:%d", source.File, source.LineNumber)
+			}
+
+			// Si no encuentra exacto, buscar nearest (±5 líneas)
+			for offset := 1; offset <= 5; offset++ {
+				if source, exists := lineMap[lineNum-offset]; exists {
+					fmt.Fprintf(os.Stderr, "[DEBUG] Found nearby (-%d): %s:%d\n", offset, source.File, source.LineNumber+offset)
+					return fmt.Sprintf("Error in %s:%d", source.File, source.LineNumber+offset)
+				}
+				if source, exists := lineMap[lineNum+offset]; exists {
+					fmt.Fprintf(os.Stderr, "[DEBUG] Found nearby (+%d): %s:%d\n", offset, source.File, source.LineNumber-offset)
+					return fmt.Sprintf("Error in %s:%d", source.File, source.LineNumber-offset)
+				}
+			}
 		}
-		dirPath = filepath.Join(workDir, dirPath)
 	}
 
-	entries, err := os.ReadDir(dirPath)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".cham" {
-			files = append(files, filepath.Join(dirPath, entry.Name()))
-		}
-	}
-
-	return files, nil
+	return ""
 }
