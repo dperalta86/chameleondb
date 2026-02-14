@@ -4,72 +4,57 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/BurntSushi/toml"
+	"github.com/chameleon-db/chameleondb/chameleon/internal/config"
 	"github.com/chameleon-db/chameleondb/chameleon/pkg/engine"
 )
 
-// LoadConnectorConfig loads config from:
+// LoadConnectorConfig loads database config from:
 // 1. DATABASE_URL environment variable (priority)
-// 2. .chameleon file in current directory
+// 2. .chameleon.yml file in current directory (v0.1.5+)
+// 3. Default configuration (localhost:5432)
 func LoadConnectorConfig() (engine.ConnectorConfig, error) {
-	// 1. Try DATABASE_URL env var (Heroku, Railway, etc.)
+	// 1. Try DATABASE_URL env var (Heroku, Railway, Docker, etc.)
 	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
-		config, err := engine.ParseConnectionString(databaseURL)
+		parsedConfig, err := engine.ParseConnectionString(databaseURL)
 		if err != nil {
 			return engine.ConnectorConfig{}, fmt.Errorf("invalid DATABASE_URL: %w", err)
 		}
 		if verbose {
 			printInfo("Using DATABASE_URL from environment")
 		}
-		return config, nil
+		return parsedConfig, nil
 	}
 
-	// 2. Try .chameleon file
-	configPath := ".chameleon"
-	if _, err := os.Stat(configPath); err == nil {
-		fileConfig := struct {
-			Database struct {
-				Host     string `toml:"host"`
-				Port     int    `toml:"port"`
-				Database string `toml:"database"`
-				User     string `toml:"user"`
-				Password string `toml:"password"`
-				MaxConns int32  `toml:"max_conns"`
-				MinConns int32  `toml:"min_conns"`
-			} `toml:"database"`
-		}{}
+	// 2. Try .chameleon.yml file (v0.1.5+)
+	workDir, err := os.Getwd()
+	if err != nil {
+		return engine.ConnectorConfig{}, fmt.Errorf("failed to get working directory: %w", err)
+	}
 
-		if _, err := toml.DecodeFile(configPath, &fileConfig); err != nil {
-			return engine.ConnectorConfig{}, fmt.Errorf("failed to parse .chameleon: %w", err)
-		}
-
-		config := engine.DefaultConfig()
-		if fileConfig.Database.Host != "" {
-			config.Host = fileConfig.Database.Host
-		}
-		if fileConfig.Database.Port != 0 {
-			config.Port = fileConfig.Database.Port
-		}
-		if fileConfig.Database.Database != "" {
-			config.Database = fileConfig.Database.Database
-		}
-		if fileConfig.Database.User != "" {
-			config.User = fileConfig.Database.User
-		}
-		if fileConfig.Database.Password != "" {
-			config.Password = fileConfig.Database.Password
-		}
-		if fileConfig.Database.MaxConns != 0 {
-			config.MaxConns = fileConfig.Database.MaxConns
-		}
-		if fileConfig.Database.MinConns != 0 {
-			config.MinConns = fileConfig.Database.MinConns
-		}
-
+	loader := config.NewLoader(workDir)
+	cfg, err := loader.Load()
+	if err == nil {
+		// Config loaded successfully
 		if verbose {
-			printInfo("Using .chameleon configuration file")
+			printInfo("Using .chameleon.yml configuration")
 		}
-		return config, nil
+
+		// Parse connection string from config
+		connStr := cfg.Database.ConnectionString
+		if connStr == "" {
+			// Fallback to defaults if connection string is empty (e.g., ${DATABASE_URL} not set)
+			if verbose {
+				printInfo("Connection string empty in config, using defaults")
+			}
+			return engine.DefaultConfig(), nil
+		}
+
+		parsed, err := engine.ParseConnectionString(connStr)
+		if err != nil {
+			return engine.ConnectorConfig{}, fmt.Errorf("invalid connection string in .chameleon.yml: %w", err)
+		}
+
+		return parsed, nil
 	}
 
 	// 3. Return defaults
